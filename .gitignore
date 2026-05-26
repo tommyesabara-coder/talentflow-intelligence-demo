@@ -6,6 +6,8 @@ openai.env
 __pycache__/
 *.pyc
 cloudflared.*.log
+gh-*.log
+gh-login-output.txt
 tools/
 tools-gh/
 backup-data/
