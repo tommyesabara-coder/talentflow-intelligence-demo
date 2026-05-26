@@ -320,8 +320,8 @@ def detect_api_key_provider(api_key: str) -> str:
 
 def validate_runtime_api_key_shape(provider: str, api_key: str) -> str:
     compact = api_key.strip()
-    if provider == "openai" and len(compact) < 40:
-        return "OpenAI API key terlihat terlalu pendek. Paste full key dari platform.openai.com, bukan key yang terpotong/termasking."
+    if provider == "openai" and len(compact) < 18:
+        return "API key terlihat terlalu pendek. Paste full key asli, bukan key yang terpotong/termasking."
     if provider == "gemini" and len(compact) < 30:
         return "Gemini API key terlihat terlalu pendek. Paste full key dari Google AI Studio."
     if provider == "together" and len(compact) < 30:
