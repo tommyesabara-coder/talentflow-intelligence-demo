@@ -1,0 +1,11 @@
+drive-config.js
+
+.env
+openai.env
+.runtime-ai-config.json
+__pycache__/
+*.pyc
+cloudflared.*.log
+tools/
+backup-data/
+backup-output/

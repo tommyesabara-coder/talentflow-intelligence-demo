@@ -1,0 +1,789 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RecruitFlow â€” Recruitment Pipeline Automation</title>
+  <link rel="stylesheet" href="styles.css?v=openrouter-key-1">
+</head>
+<body>
+  <div class="product-shell">
+    <aside class="sidebar" aria-label="Navigasi utama">
+      <a class="sidebar-brand" href="#blueprint" aria-label="Kembali ke Job Blueprint RecruitFlow">
+        <span class="brand-orb">R</span>
+        <span>
+          <strong>RecruitFlow</strong>
+          <small>HC Automation Suite</small>
+        </span>
+      </a>
+
+      <nav class="sidebar-nav" aria-label="Modul RecruitFlow">
+        <a class="sidebar-link active" href="#blueprint">
+          <span class="nav-icon">01</span>
+          <span>Blueprint</span>
+          <small id="sidebarJobsCount">0</small>
+        </a>
+        <a class="sidebar-link" href="#pipeline">
+          <span class="nav-icon">02</span>
+          <span>Pipeline</span>
+          <small id="sidebarPipelineCount">0</small>
+        </a>
+        <a class="sidebar-link" href="#activity">
+          <span class="nav-icon">03</span>
+          <span>Activity</span>
+        </a>
+        <a class="sidebar-link" href="#tasks">
+          <span class="nav-icon">04</span>
+          <span>Tasks</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-card">
+        <p class="eyebrow">Automation health</p>
+        <strong>Live screening</strong>
+        <span>CV intake, scoring, dan SLA scan aktif untuk demo.</span>
+      </div>
+
+      <div class="sidebar-profile">
+        <span class="avatar">HC</span>
+        <div>
+          <strong>Recruiter Workspace</strong>
+          <small>Demo environment</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="app-shell">
+      <header class="top-nav command-header" aria-label="Talent intelligence command">
+        <div class="top-nav-title">
+          <p class="eyebrow">WORKSPACE</p>
+          <h2>TalentFlow Intelligence</h2>
+          <span>Smart hiring workspace for candidate movement, follow-up clarity, and decision-ready recruitment.</span>
+        </div>
+
+        <label class="global-search" for="globalSearchInput">
+          <span>SEARCH</span>
+          <input id="globalSearchInput" type="search" placeholder="Cari kandidat, posisi, sumber, atau stage">
+          <kbd>&#8984;K</kbd>
+        </label>
+
+        <div class="top-nav-actions">
+          <button id="topApiKeyBtn" class="button button-secondary api-key-open-btn">Input API Key</button>
+          <button id="topOpenImportBtn" class="button button-secondary">Import CV</button>
+          <button id="topAddCandidateBtn" class="button button-primary">+ Kandidat</button>
+        </div>
+      </header>
+      <section class="metrics-grid command-kpi-grid" aria-label="Recruitment KPI summary">
+        <article class="metric-card command-kpi-card kpi-filter-card" role="button" tabindex="0" data-kpi-filter="active">
+          <span class="metric-label">Active Candidates</span>
+          <strong id="activeCandidatesMetric">0</strong>
+          <small id="activeCandidatesDetail">2 in progress · 1 at risk</small>
+        </article>
+        <article class="metric-card command-kpi-card kpi-filter-card" role="button" tabindex="0" data-kpi-filter="interview">
+          <span class="metric-label">Interviews This Week</span>
+          <strong id="interviewsMetric">0</strong>
+          <small id="interviewsDetail">Next action ready</small>
+        </article>
+        <article class="metric-card command-kpi-card risk-card followup-risk-card kpi-filter-card" role="button" tabindex="0" data-kpi-filter="followup">
+          <span class="metric-label">Follow-up Risk</span>
+          <strong id="slaMetric">0</strong>
+          <small id="slaDetail">Action required today</small>
+        </article>
+        <article class="metric-card command-kpi-card conversion-card kpi-filter-card" role="button" tabindex="0" data-kpi-filter="offer">
+          <span class="metric-label">Offer-to-Hire Conversion</span>
+          <strong id="conversionMetric">0%</strong>
+          <small id="conversionDetail">1 hired from 2 offers</small>
+        </article>
+      </section>
+
+      <section class="today-focus-strip" aria-label="Today Focus">
+        <span>Today Focus</span>
+        <button type="button" class="focus-pill" data-focus-stage="risk">1 Follow-up Risk</button>
+        <button type="button" class="focus-pill" data-focus-stage="interview">1 Interview This Week</button>
+        <button type="button" class="focus-pill" data-focus-stage="offer">1 Offer Pending</button>
+      </section>
+
+    <header id="overview" class="hero hero-public">
+      <div class="hero-narrative">
+        <p class="eyebrow">Public SaaS Demo â€¢ Human Capital Automation</p>
+        <h1>RecruitFlow</h1>
+        <p class="hero-copy">
+          Recruitment automation platform untuk mengubah tumpukan CV menjadi shortlist yang ter-score,
+          rapi, dan siap diputuskan oleh recruiter.
+        </p>
+        <div class="hero-badges" aria-label="Kapabilitas utama">
+          <span>CV Parser</span>
+          <span>Google Drive Import</span>
+          <span>Private Scoring Rules</span>
+          <span>Follow-up Guardrail</span>
+        </div>
+      </div>
+
+      <div class="hero-command-card">
+        <p class="eyebrow">Demo story</p>
+        <h2>CV masuk â†’ score â†’ shortlist</h2>
+        <ol class="demo-flow">
+          <li>Recruiter pilih folder CV</li>
+          <li>Sistem membaca PDF/Word otomatis</li>
+          <li>Kandidat di-score sesuai job blueprint</li>
+          <li>Pipeline dan next action langsung tersusun</li>
+        </ol>
+        <div class="hero-actions">
+          <button id="openJobBuilderBtn" class="button button-ghost">Buat Job Blueprint</button>
+          <button id="openImportBtn" class="button button-ghost">Import CV</button>
+          <button id="simulateCandidateBtn" class="button button-primary">+ Simulasikan Kandidat Baru</button>
+          <button id="dailyAutomationBtn" class="button button-secondary">Jalankan Automation Harian</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="commercial" class="commercial-grid" aria-label="Sales view untuk calon pembeli">
+        <article class="commercial-card commercial-card-large">
+          <p class="eyebrow">Why companies buy</p>
+          <h2>Kurangi kerja administratif recruiter tanpa menghilangkan kontrol manusia.</h2>
+          <p>
+            RecruitFlow tidak menggantikan keputusan HC. Ia merapikan intake, memberi score awal,
+            menandai follow-up risk, dan membuat recruiter fokus pada keputusan yang bernilai.
+          </p>
+          <div class="commercial-stats">
+            <span><strong id="commercialActiveMetric">0</strong>Kandidat aktif</span>
+          <span><strong id="commercialJobMetric">0</strong>Blueprint aktif</span>
+            <span><strong id="commercialSlaMetric">0</strong>Follow-up risk</span>
+          </div>
+        </article>
+
+        <article class="commercial-card">
+          <span class="card-kicker">Buyer promise</span>
+          <h3>Deploy cepat untuk tim HC</h3>
+          <p>Mulai dari import CV, scoring per lowongan, sampai pipeline review dalam satu alur demo yang mudah dipahami.</p>
+        </article>
+
+        <article class="commercial-card">
+          <span class="card-kicker">Trust signal</span>
+          <h3>Data tetap terkendali</h3>
+          <p>Scoring rules bersifat internal, direct Drive import meminta izin user, dan kandidat tetap diputuskan recruiter.</p>
+        </article>
+      </section>
+
+<section id="tour" class="panel product-tour">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Product tour</p>
+            <h2>Alur yang mudah dijual ke HR Manager</h2>
+          </div>
+          <a class="button button-secondary" href="#pipeline">Lihat pipeline</a>
+        </div>
+        <div class="tour-grid">
+          <article>
+            <span>01</span>
+            <h3>Buat job brief minimum</h3>
+            <p>User cukup menulis posisi, perusahaan, jenis usaha, role, level, dan preferensi tambahan.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Import CV massal</h3>
+            <p>Recruiter dapat menarik PDF/Word dari komputer atau Google Drive tanpa mengetik kandidat satu per satu.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>AI generate blueprint</h3>
+            <p>Sistem merekomendasikan KPI orientation, soft skill, hard skill, administrative requirement, dan DISC role-fit.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>Scoring berbasis blueprint</h3>
+            <p>CV dianalisa terhadap blueprint aktif sehingga score, alasan, dan gap kandidat bisa dijelaskan.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="blueprint" class="panel blueprint-builder-panel builder-hidden">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Input Jobdesc</p>
+            <h2>Buat standar posisi</h2>
+          </div>
+          <div class="panel-header-actions">
+            <button id="closeBlueprintBuilderBtn" class="icon-button builder-close-btn" type="button" aria-label="Tutup Job Blueprint Builder">Ã—</button>
+          </div>
+        </div>
+
+        <form id="blueprintForm" class="blueprint-form">
+          <div class="form-grid">
+            <label>
+              Nama posisi
+              <input name="positionName" required >
+            </label>
+            <label>
+              Perusahaan bergerak di bidang apa
+              <input name="businessType" required >
+            </label>
+            <label>
+              Level jabatan
+              <select name="positionLevel" required>
+                <option value="operative">Operative</option>
+                <option value="team leader">Team Leader</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="manager" selected>Manager</option>
+                <option value="general manager">General Manager</option>
+                <option value="vice president">Vice President</option>
+                <option value="director">Director / Executive</option>
+              </select>
+            </label>
+            <label>
+              Pendidikan minimal
+              <select name="minimumEducation" required>
+                <option value="SMA">SMA / SMK</option>
+                <option value="D3">D3</option>
+                <option value="S1" selected>S1</option>
+                <option value="S2">S2</option>
+              </select>
+            </label>
+            <label>
+              Jurusan
+              <input name="fieldOfStudy">
+            </label>
+            <label>
+              Pengalaman kerja minimal
+              <select name="minimumExperience" required>
+                <option value="1">1 tahun</option>
+                <option value="2">2 tahun</option>
+                <option value="3">3 tahun</option>
+                <option value="4">4 tahun</option>
+                <option value="5" selected>5 tahun</option>
+                <option value="6">6 tahun</option>
+                <option value="7">7 tahun</option>
+                <option value="8">8 tahun</option>
+                <option value="9">9 tahun</option>
+                <option value="10">10 tahun</option>
+                <option value="11">11 tahun</option>
+                <option value="12">12 tahun</option>
+                <option value="13">13 tahun</option>
+                <option value="14">14 tahun</option>
+                <option value="15">15 tahun</option>
+                <option value="16">16 tahun</option>
+                <option value="17">17 tahun</option>
+                <option value="18">18 tahun</option>
+                <option value="19">19 tahun</option>
+                <option value="20">20 tahun</option>
+              </select>
+            </label>
+            <label>
+              Tugas dan tanggung jawab
+              <textarea name="responsibilities" required ></textarea>
+            </label>
+            <label>
+              Preferensi / catatan tambahan
+              <textarea name="preferences" ></textarea>
+            </label>
+          </div>
+
+          <div class="blueprint-actions">
+            <button id="analyzeBlueprintBtn" type="button" class="button button-primary">Simpan</button>
+            <button id="clearBlueprintBtn" type="button" class="button button-ghost">Bersihkan</button>
+          </div>
+        </form>
+
+        <div id="blueprintPreview" class="blueprint-preview empty-state builder-preview-hidden" hidden></div>
+      </section>
+
+      <section id="jobs" class="panel jobs-panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Jobdesc</p>
+            <h2>Jobdesc Library</h2>
+          </div>
+          <button id="openJobBuilderPanelBtn" class="button button-secondary">+ Input jobdesc</button>
+        </div>
+        <div id="jobsList" class="jobs-list" aria-live="polite"></div>
+      </section>
+
+      <section class="workspace-grid">
+        <div id="pipeline" class="panel pipeline-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Pipeline</p>
+              <h2>Candidate Smart List</h2>
+            </div>
+            <div class="toolbar">
+              <label class="search-field">
+                <span>Cari</span>
+                <input id="searchInput" type="search" placeholder="Nama, role, source">
+              </label>
+              <label class="search-field">
+                <span>Stage</span>
+                <select id="stageFilter">
+                  <option value="all">Semua stage</option>
+                </select>
+              </label>
+              <label class="search-field">
+                <span>Role</span>
+                <select id="roleFilter">
+                  <option value="all">Semua role</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div id="pipelineBoard" class="pipeline-board" aria-live="polite"></div>
+        </div>
+
+        <aside class="side-stack">
+          <section id="activity" class="panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">Automation</p>
+                <h2>Live Activity Feed</h2>
+              </div>
+              <button id="resetDemoBtn" class="text-button">Reset demo</button>
+            </div>
+            <ol id="activityFeed" class="activity-feed"></ol>
+          </section>
+
+          <section id="tasks" class="panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">Task Queue</p>
+                <h2>Next Best Actions</h2>
+              </div>
+            </div>
+            <div id="taskQueue" class="task-queue"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+    </div>
+  </div>
+
+  <dialog id="candidateDialog" class="candidate-dialog">
+    <form method="dialog" id="candidateForm">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Tambah kandidat</p>
+          <h2>Applicant Intake</h2>
+        </div>
+        <button type="button" id="closeDialogBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Nama kandidat
+          <input name="name" required placeholder="Contoh: Nadia Putri">
+        </label>
+        <label>
+          Posisi
+          <select id="candidateRoleSelect" name="role" required>
+            <option value="People Analytics Specialist">People Analytics Specialist</option>
+            <option value="Talent Acquisition Partner">Talent Acquisition Partner</option>
+            <option value="HR Operations Officer">HR Operations Officer</option>
+          </select>
+        </label>
+        <label>
+          Sumber kandidat
+          <select name="source" required>
+            <option value="LinkedIn">LinkedIn</option>
+            <option value="Referral">Referral</option>
+            <option value="Job Portal">Job Portal</option>
+            <option value="Career Site">Career Site</option>
+          </select>
+        </label>
+        <label>
+          Tahun pengalaman
+          <input name="experience" type="number" min="0" max="20" required value="3">
+        </label>
+      </div>
+
+      <label>
+        Skill utama
+        <textarea name="skills" required placeholder="Contoh: analytics, SQL, dashboard, stakeholder management"></textarea>
+      </label>
+
+      <menu>
+        <button type="button" id="cancelDialogBtn" class="button button-ghost">Batal</button>
+        <button class="button button-primary">Simpan & Jalankan Automation</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="importDialog" class="import-dialog">
+    <form id="importForm">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Bulk CV intake</p>
+          <h2>Import dari CV</h2>
+        </div>
+        <button type="button" id="closeImportBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+      </div>
+
+      <div class="import-grid">
+        <label>
+          Posisi tujuan
+          <select id="importTargetRoleSelect" name="targetRole" required>
+            <option value="People Analytics Specialist">People Analytics Specialist</option>
+            <option value="Talent Acquisition Partner">Talent Acquisition Partner</option>
+            <option value="HR Operations Officer">HR Operations Officer</option>
+          </select>
+        </label>
+
+        <label>
+          Sumber kandidat
+          <select name="source" required>
+            <option value="CV Folder Import">Folder komputer</option>
+            <option value="Google Drive Sync">Google Drive tersinkron</option>
+            <option value="Manual Upload">Upload manual</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="import-source-grid">
+        <section class="import-card">
+          <p class="eyebrow">Folder komputer</p>
+          <h3>Pilih folder CV</h3>
+          <p>Ambil banyak CV PDF atau Word sekaligus dari satu folder.</p>
+          <label class="file-picker">
+            Pilih folder
+            <input id="folderInput" type="file" webkitdirectory directory multiple accept=".pdf,.doc,.docx">
+          </label>
+        </section>
+
+        <section class="import-card">
+          <p class="eyebrow">File terpisah</p>
+          <h3>Pilih beberapa CV</h3>
+          <p>Cocok jika file tersebar di beberapa lokasi.</p>
+          <label class="file-picker">
+            Pilih file
+            <input id="fileInput" type="file" multiple accept=".pdf,.doc,.docx">
+          </label>
+        </section>
+
+        <section class="import-card muted-card">
+          <p class="eyebrow">Google Drive cloud</p>
+          <h3>Direct cloud import</h3>
+          <p id="driveConnectionCopy">Hubungkan Google Drive untuk memilih folder CV langsung dari cloud.</p>
+          <div class="drive-actions">
+            <button type="button" id="connectDriveBtn" class="button button-secondary">Hubungkan Drive</button>
+            <button type="button" id="pickDriveFolderBtn" class="button button-primary" disabled>Pilih folder Drive</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="selectedFilesBox" class="selected-files-box">
+        Belum ada CV dipilih.
+      </div>
+
+      <div id="aiParserStatus" class="ai-parser-status">
+        Mengecek koneksi AI parser...
+      </div>
+
+      <div id="importStatus" class="import-status" aria-live="polite"></div>
+
+      <menu>
+        <button type="button" id="cancelImportBtn" class="button button-ghost">Batal</button>
+        <button id="submitImportBtn" class="button button-primary">Import CV ke Pipeline</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="importSuccessDialog" class="import-success-dialog">
+    <div class="import-success-content">
+      <div class="success-orb" aria-hidden="true">âœ“</div>
+      <p class="eyebrow">CV intake complete</p>
+      <h2 id="importSuccessTitle">CV berhasil diupload</h2>
+      <p id="importSuccessCopy">Kandidat sudah masuk Candidate Smart List.</p>
+      <menu>
+        <button type="button" id="confirmImportSuccessBtn" class="button button-primary">OK</button>
+      </menu>
+    </div>
+  </dialog>
+
+  <dialog id="driveDialog" class="drive-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Google Drive</p>
+        <h2>Yang dibutuhkan untuk direct import</h2>
+      </div>
+      <button type="button" id="closeDriveBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+    </div>
+
+    <ol class="setup-list">
+      <li>Google Cloud project dengan Drive API aktif</li>
+      <li>OAuth client ID untuk web app</li>
+      <li>Scope izin baca file CV dari folder yang dipilih</li>
+      <li>Folder selector atau Google Picker untuk memilih CV dari Drive</li>
+    </ol>
+
+    <p class="dialog-note">
+      Jalur folder cloud memakai Google Picker untuk memilih folder, lalu Drive API untuk membaca isi folder
+      dan mengunduh CV PDF/DOCX yang ada di dalamnya.
+    </p>
+  </dialog>
+
+  <dialog id="jobDialog" class="job-dialog">
+    <form id="jobForm">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Job Ad Builder</p>
+          <h2>Buat Iklan Lowongan</h2>
+        </div>
+        <button type="button" id="closeJobDialogBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Judul posisi
+          <input name="title" required placeholder="Contoh: HR Business Partner">
+        </label>
+        <label>
+          Departemen
+          <input name="department" required placeholder="Contoh: Human Capital">
+        </label>
+        <label>
+          Lokasi
+          <input name="location" required placeholder="Contoh: Jakarta">
+        </label>
+        <label>
+          Tipe kerja
+          <select name="workMode" required>
+            <option value="On-site">On-site</option>
+            <option value="Hybrid">Hybrid</option>
+            <option value="Remote">Remote</option>
+          </select>
+        </label>
+        <label>
+          Status pekerjaan
+          <select name="employmentType" required>
+            <option value="Full-time">Full-time</option>
+            <option value="Contract">Contract</option>
+            <option value="Internship">Internship</option>
+          </select>
+        </label>
+        <label>
+          Minimum pengalaman untuk scoring
+          <input name="minExperience" type="number" min="0" max="25" required value="3">
+        </label>
+      </div>
+
+      <div class="builder-grid">
+        <section class="builder-section">
+          <p class="eyebrow">Terlihat di iklan</p>
+          <label>
+            Ringkasan lowongan
+            <textarea name="summary" required placeholder="Ceritakan peran ini secara singkat dan menarik."></textarea>
+          </label>
+          <label>
+            Tanggung jawab utama
+            <textarea name="responsibilities" required placeholder="Satu poin per baris."></textarea>
+          </label>
+          <label>
+            Kualifikasi yang ditampilkan
+            <textarea name="requirements" required placeholder="Satu poin per baris."></textarea>
+          </label>
+          <label>
+            Benefit / daya tarik
+            <textarea name="benefits" placeholder="Satu poin per baris."></textarea>
+          </label>
+        </section>
+
+        <section class="builder-section private-section">
+          <p class="eyebrow">Internal HC scoring</p>
+          <label>
+            Must-have skills
+            <textarea name="mustHaveSkills" required placeholder="Contoh: payroll, HRIS, Excel"></textarea>
+          </label>
+          <label>
+            Nice-to-have skills
+            <textarea name="niceHaveSkills" placeholder="Contoh: Power BI, dashboard, people analytics"></textarea>
+          </label>
+          <label>
+            Keyword khusus penambah score
+            <textarea name="keywords" placeholder="Contoh: union relation, job evaluation, competency matrix"></textarea>
+          </label>
+          <label>
+            Red flag / pengurang score
+            <textarea name="disqualifiers" placeholder="Contoh: no payroll, kurang komunikasi, tidak bersedia hybrid"></textarea>
+          </label>
+          <label>
+            Threshold auto-screening
+            <input name="autoScreenThreshold" type="number" min="50" max="99" required value="85">
+          </label>
+          <label>
+            Catatan internal
+            <textarea name="internalNotes" placeholder="Catatan untuk recruiter, tidak muncul di iklan."></textarea>
+          </label>
+        </section>
+      </div>
+
+      <menu>
+        <button type="button" id="cancelJobDialogBtn" class="button button-ghost">Batal</button>
+        <button class="button button-primary">Simpan Lowongan & Rules</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <template id="candidateCardTemplate">
+    <article class="candidate-card">
+      <div class="card-topline">
+        <span class="stage-age"></span>
+        <span class="score-pill"></span>
+      </div>
+      <h3></h3>
+      <p class="role-line"></p>
+      <div class="tag-row"></div>
+      <div class="card-actions">
+        <button class="mini-button detail-btn">Detail</button>
+        <button class="mini-button advance-btn">Lanjutkan</button>
+        <button class="mini-button secondary-action-btn">Aksi</button>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="detailDialog" class="detail-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Candidate profile</p>
+        <h2 id="detailName"></h2>
+      </div>
+      <div class="detail-header-actions">
+        <button type="button" id="reanalyzeCandidateBtn" class="button button-secondary detail-reanalyze-btn">
+          AI Re-analyze
+        </button>
+        <button type="button" id="closeDetailBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <section>
+        <h3>Ringkasan</h3>
+        <div id="detailSummary" class="candidate-detail-content"></div>
+      </section>
+      <section>
+        <h3>Automation trail</h3>
+        <ol id="detailTrail" class="detail-trail"></ol>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="blueprintDetailDialog" class="blueprint-detail-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Blueprint detail</p>
+        <h2 id="blueprintDetailTitle"></h2>
+      </div>
+      <button type="button" id="closeBlueprintDetailBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+    </div>
+
+    <div id="blueprintDetailContent" class="blueprint-detail-content"></div>
+  </dialog>
+
+  <dialog id="storedCvDialog" class="stored-cv-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">CV</p>
+        <h2 id="storedCvTitle">Pilih CV</h2>
+      </div>
+      <button type="button" id="closeStoredCvBtn" class="icon-button" aria-label="Tutup">Ã—</button>
+    </div>
+    <div id="storedCvContent" class="stored-cv-content"></div>
+  </dialog>
+
+  <dialog id="interviewBriefDialog" class="interview-brief-dialog">
+    <div id="interviewBriefContent" class="interview-brief-shell" aria-live="polite"></div>
+  </dialog>
+
+  <dialog id="interviewResultDialog" class="interview-result-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Interview Result</p>
+        <h2 id="interviewResultTitle">Hasil Interview</h2>
+      </div>
+      <button type="button" id="closeInterviewResultBtn" class="icon-button" aria-label="Tutup">×</button>
+    </div>
+    <div id="interviewResultContent" class="interview-result-content"></div>
+  </dialog>
+
+  <dialog id="stageDateDialog" class="stage-date-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">Schedule</p>
+        <h2 id="stageDateTitle">Pilih tanggal</h2>
+      </div>
+      <button type="button" id="closeStageDateBtn" class="icon-button" aria-label="Tutup">×</button>
+    </div>
+    <form id="stageDateForm" class="stage-date-form">
+      <p id="stageDateCopy" class="dialog-note">Tanggal ini akan ditampilkan compact di candidate journey.</p>
+      <label>
+        Tanggal
+        <input id="stageDateInput" name="stageDate" type="date" required>
+      </label>
+      <menu>
+        <button type="button" id="cancelStageDateBtn" class="button button-secondary">Batal</button>
+        <button type="submit" class="button button-primary">Simpan tanggal</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="apiKeyDialog" class="api-key-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">AI Engine</p>
+        <h2>Input API Key</h2>
+      </div>
+      <button type="button" id="closeApiKeyBtn" class="icon-button" aria-label="Tutup">×</button>
+    </div>
+    <form id="apiKeyForm" class="api-key-form">
+      <p class="dialog-note">Paste API key saja. Sistem otomatis mengenali Gemini, OpenAI, OpenRouter, atau Together dari format key, lalu menyimpannya di server demo lokal.</p>
+      <label>
+        API Key
+        <input id="apiKeyValue" name="apiKey" type="password" placeholder="Paste API key di sini" autocomplete="off" required>
+      </label>
+      <div id="apiKeyStatus" class="api-key-status" aria-live="polite"></div>
+      <menu>
+        <button type="button" id="cancelApiKeyBtn" class="button button-secondary">Batal</button>
+        <button type="submit" class="button button-primary">Simpan API Key</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="drive-config.js"></script>
+  <script src="app.js?v=openrouter-key-1"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

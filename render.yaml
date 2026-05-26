@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: talentflow-intelligence-demo
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_RESUME_MODEL
+        value: gemini-2.5-flash
+      - key: HYBRID_FAST_PARSER
+        value: "true"
+      - key: HYBRID_CONFIDENCE_THRESHOLD
+        value: "0.78"
+      - key: HYBRID_FIELD_CONFIDENCE_THRESHOLD
+        value: "0.64"
