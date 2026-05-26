@@ -1,0 +1,14 @@
+.git
+.env
+openai.env
+.runtime-ai-config.json
+drive-config.js
+__pycache__/
+*.pyc
+backup-data/
+backup-output/
+tools/
+tools-gh/
+cloudflared.*.log
+gh-*.log
+gh-login-output.txt

@@ -1,4 +1,13 @@
-# RecruitFlow — Dummy Recruitment Pipeline Automation
+﻿---
+title: TalentFlow Intelligence
+emoji: 🧭
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
+# RecruitFlow â€” Dummy Recruitment Pipeline Automation
 
 Prototype web statis untuk demo penjualan improvement Human Capital.
 
@@ -63,3 +72,4 @@ Saat CV diimport untuk posisi tersebut, score kandidat dihitung dari aturan inte
 ## Nilai jual yang ingin terlihat
 
 Recruiter tidak lagi sibuk mengejar status kandidat satu per satu; sistem yang menjaga ritme proses, manusia fokus pada keputusan.
+
