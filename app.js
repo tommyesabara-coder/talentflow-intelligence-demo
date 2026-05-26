@@ -1971,7 +1971,7 @@ function hideBlueprintBuilder() {
 }
 
 function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (char) => {
+  return repairDisplayText(value).replace(/[&<>"']/g, (char) => {
     const entities = {
       "&": "&amp;",
       "<": "&lt;",
@@ -1981,6 +1981,17 @@ function escapeHtml(value) {
     };
     return entities[char];
   });
+}
+
+function repairDisplayText(value) {
+  return String(value ?? "")
+    .replaceAll("â€¢", "•")
+    .replaceAll("â€”", "—")
+    .replaceAll("â€“", "–")
+    .replaceAll("â€œ", "“")
+    .replaceAll("â€", "”")
+    .replaceAll("â€™", "’")
+    .replaceAll("封封", "••••");
 }
 
 function openJobDialog() {
