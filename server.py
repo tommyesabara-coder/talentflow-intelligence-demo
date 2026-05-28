@@ -1963,11 +1963,15 @@ def call_aimlapi_json(
         "messages": [
             {
                 "role": "system",
-                "content": "Return only valid JSON matching the schema. Do not add markdown or commentary.",
+                "content": (
+                    "Return only valid minified JSON matching the schema. "
+                    "Do not add markdown or commentary. Use double quotes for all keys/strings. "
+                    "Escape newlines inside string values. Do not use trailing commas."
+                ),
             },
             {"role": "user", "content": prompt},
         ],
-        "temperature": temperature,
+        "temperature": min(float(temperature or 0), 0.08),
         "max_tokens": 3600,
         "response_format": {"type": "json_object"},
     }
@@ -2048,11 +2052,17 @@ def call_litellm_json(
             try:
                 with urlopen_direct(request, timeout=timeout) as response:  # noqa: S310
                     response_payload = json.loads(response.read().decode("utf-8"))
-                parsed = extract_json_from_chat_completions_response(response_payload)
+                raw_content = extract_chat_completions_text(response_payload)
+                parsed = parse_json_string(raw_content) if raw_content else extract_json_from_chat_completions_response(response_payload)
+                if not isinstance(parsed, dict) and raw_content:
+                    repaired = repair_litellm_json_response(raw_content, schema_name, timeout=min(timeout, 60))
+                    if isinstance(repaired, dict):
+                        parsed = repaired
                 if isinstance(parsed, dict):
                     parsed.setdefault("model", model)
                     return parsed
-                return None
+                last_error = ValueError(f"Team Model {model}: output AI bukan JSON valid.")
+                continue
             except urllib.error.HTTPError as exc:
                 last_error = exc
                 if exc.code == 404 and endpoint.endswith("/v1/chat/completions"):
@@ -2797,6 +2807,83 @@ def extract_json_from_chat_completions_response(payload: Any) -> dict[str, Any] 
     return None
 
 
+def extract_chat_completions_text(payload: Any) -> str:
+    try:
+        choices = payload.get("choices", [])
+        for choice in choices:
+            message = choice.get("message", {})
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text") or item.get("content")
+                        if isinstance(text, str):
+                            parts.append(text)
+                if parts:
+                    return "\n".join(parts)
+    except AttributeError:
+        return ""
+    return ""
+
+
+def repair_litellm_json_response(raw_content: str, schema_name: str, timeout: int = 60) -> dict[str, Any] | None:
+    api_key = get_litellm_api_key()
+    base_url = get_litellm_base_url()
+    if not api_key or not base_url:
+        return None
+    model = get_litellm_model()
+    repair_prompt = f"""
+Perbaiki teks berikut menjadi JSON valid saja.
+Jangan mengubah makna.
+Jangan tambah markdown.
+Jika ada koma hilang, trailing comma, newline di dalam string, atau quote rusak, rapikan.
+Output harus satu object JSON valid untuk schema: {schema_name}.
+
+TEKS RUSAK:
+{raw_content[:18000]}
+""".strip()
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You repair malformed JSON. Return valid JSON object only. No markdown, no explanation.",
+            },
+            {"role": "user", "content": repair_prompt},
+        ],
+        "temperature": 0,
+        "max_tokens": 3600,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "x-litellm-api-key": api_key,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 TalentFlow/1.0",
+    }
+    for endpoint in openai_compatible_urls(base_url, "chat/completions"):
+        try:
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            with urlopen_direct(request, timeout=timeout) as response:  # noqa: S310
+                response_payload = json.loads(response.read().decode("utf-8"))
+            repaired_text = extract_chat_completions_text(response_payload)
+            parsed = parse_json_string(repaired_text)
+            if isinstance(parsed, dict):
+                parsed.setdefault("model", model)
+                return parsed
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
 def format_openai_compatible_http_error(provider: str, model: str, exc: urllib.error.HTTPError) -> str:
     try:
         payload = json.loads(exc.read().decode("utf-8", errors="replace"))
@@ -2809,13 +2896,96 @@ def format_openai_compatible_http_error(provider: str, model: str, exc: urllib.e
 
 
 def parse_json_string(value: str) -> Any:
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", value, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidates = []
+    cleaned = value.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    candidates.append(cleaned)
+    balanced = extract_balanced_json_object(cleaned)
+    if balanced and balanced != cleaned:
+        candidates.append(balanced)
+    for candidate in list(candidates):
+        repaired = repair_common_json_text(candidate)
+        if repaired not in candidates:
+            candidates.append(repaired)
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
     return None
+
+
+def extract_balanced_json_object(value: str) -> str:
+    start = value.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(value)):
+        char = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return value[start : index + 1]
+    last = value.rfind("}")
+    return value[start : last + 1] if last > start else value[start:]
+
+
+def repair_common_json_text(value: str) -> str:
+    text = value.strip().replace("\ufeff", "")
+    text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    text = re.sub(r"\bNone\b", "null", text)
+    text = re.sub(r"\bTrue\b", "true", text)
+    text = re.sub(r"\bFalse\b", "false", text)
+    return escape_raw_newlines_inside_json_strings(text)
+
+
+def escape_raw_newlines_inside_json_strings(value: str) -> str:
+    output = []
+    in_string = False
+    escaped = False
+    for char in value:
+        if in_string:
+            if escaped:
+                output.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                output.append(char)
+                escaped = True
+                continue
+            if char == '"':
+                output.append(char)
+                in_string = False
+                continue
+            if char == "\n":
+                output.append("\\n")
+                continue
+            if char == "\r":
+                continue
+            output.append(char)
+            continue
+        output.append(char)
+        if char == '"':
+            in_string = True
+    return "".join(output)
 
 
 def merge_ai_candidate(local_candidate: dict[str, Any], ai_candidate: dict[str, Any]) -> dict[str, Any]:
