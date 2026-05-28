@@ -34,6 +34,8 @@ OPENROUTER_DEFAULT_MODEL = "google/gemini-2.5-flash"
 OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 COMETAPI_DEFAULT_MODEL = "gemini-2.5-flash"
 COMETAPI_DEFAULT_BASE_URL = "https://api.cometapi.com/v1"
+AIMLAPI_DEFAULT_MODEL = "gpt-4o-mini"
+AIMLAPI_DEFAULT_BASE_URL = "https://api.aimlapi.com/v1"
 OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
@@ -203,6 +205,14 @@ def get_cometapi_api_key() -> str:
     return "" if value.lower() in placeholders else value
 
 
+def get_aimlapi_api_key() -> str:
+    value = get_config("AIMLAPI_API_KEY").strip()
+    if value.upper().startswith("AIMLAPI_API_KEY="):
+        value = value.split("=", 1)[1].strip()
+    placeholders = {"", "isi_key_aimlapi_anda", "your_aimlapi_api_key_here", "sk-..."}
+    return "" if value.lower() in placeholders else value
+
+
 def get_resume_models() -> list[str]:
     configured = get_config("OPENAI_RESUME_MODEL", OPENAI_PRIMARY_RESUME_MODEL)
     fallback = get_config("OPENAI_RESUME_FALLBACK_MODEL", OPENAI_FALLBACK_RESUME_MODEL)
@@ -236,6 +246,14 @@ def get_cometapi_model() -> str:
 
 def get_cometapi_base_url() -> str:
     return get_config("COMETAPI_BASE_URL", COMETAPI_DEFAULT_BASE_URL).strip().rstrip("/") or COMETAPI_DEFAULT_BASE_URL
+
+
+def get_aimlapi_model() -> str:
+    return get_config("AIMLAPI_MODEL", AIMLAPI_DEFAULT_MODEL).strip() or AIMLAPI_DEFAULT_MODEL
+
+
+def get_aimlapi_base_url() -> str:
+    return get_config("AIMLAPI_BASE_URL", AIMLAPI_DEFAULT_BASE_URL).strip().rstrip("/") or AIMLAPI_DEFAULT_BASE_URL
 
 
 def get_ollama_base_url() -> str:
@@ -300,7 +318,7 @@ def get_ollama_status(timeout: float = 0.8) -> dict[str, Any]:
 def configured_ai_engines() -> list[str]:
     preferred = [
         engine.strip().lower()
-        for engine in get_config("AI_ENGINE_PROVIDERS", "gemini,openai,cometapi,openrouter,together").split(",")
+        for engine in get_config("AI_ENGINE_PROVIDERS", "gemini,openai,cometapi,aimlapi,openrouter,together").split(",")
         if engine.strip()
     ]
     engines: list[str] = []
@@ -315,13 +333,15 @@ def configured_ai_engines() -> list[str]:
             engines.append("openrouter")
         if engine == "cometapi" and get_cometapi_api_key():
             engines.append("cometapi")
+        if engine == "aimlapi" and get_aimlapi_api_key():
+            engines.append("aimlapi")
     return dedupe(engines)
 
 
 def runtime_ai_key_configured() -> bool:
     return any(
         load_runtime_config().get(key)
-        for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "TOGETHER_API_KEY", "OPENROUTER_API_KEY", "COMETAPI_API_KEY", "OPENAI_COMPATIBLE_API_KEY")
+        for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "TOGETHER_API_KEY", "OPENROUTER_API_KEY", "COMETAPI_API_KEY", "AIMLAPI_API_KEY", "OPENAI_COMPATIBLE_API_KEY")
     )
 
 
@@ -373,6 +393,7 @@ def build_ai_status() -> dict[str, Any]:
             "togetherConfigured": bool(get_together_api_key()),
             "openrouterConfigured": bool(get_openrouter_api_key()),
             "cometapiConfigured": bool(get_cometapi_api_key()),
+            "aimlapiConfigured": bool(get_aimlapi_api_key()),
             "ollamaConfigured": ollama_ready,
             "mode": f"Ollama Local AI â€¢ {configured_model}" if ollama_ready else "Local Max Parser",
             "primaryModel": configured_model if ollama_ready else "Local rules + evidence scoring",
@@ -396,6 +417,7 @@ def build_ai_status() -> dict[str, Any]:
     together_key = get_together_api_key()
     openrouter_key = get_openrouter_api_key()
     cometapi_key = get_cometapi_api_key()
+    aimlapi_key = get_aimlapi_api_key()
     active_engines = configured_ai_engines()
     providers = []
     if "openai" in active_engines and openai_key:
@@ -408,6 +430,8 @@ def build_ai_status() -> dict[str, Any]:
         providers.append(f"OpenRouter {get_openrouter_model()}")
     if "cometapi" in active_engines and cometapi_key:
         providers.append(f"CometAPI {get_cometapi_model()}")
+    if "aimlapi" in active_engines and aimlapi_key:
+        providers.append(f"AIMLAPI {get_aimlapi_model()}")
     ai_configured = bool(providers)
     return {
         "aiConfigured": ai_configured,
@@ -416,6 +440,7 @@ def build_ai_status() -> dict[str, Any]:
         "togetherConfigured": bool(together_key),
         "openrouterConfigured": bool(openrouter_key),
         "cometapiConfigured": bool(cometapi_key),
+        "aimlapiConfigured": bool(aimlapi_key),
         "mode": " + ".join(providers) if providers else "Local Smart Parser",
         "primaryModel": providers[0] if providers else get_resume_models()[0],
         "fallbackModels": providers[1:],
@@ -657,6 +682,7 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
                 "together": ("TOGETHER_API_KEY", "TOGETHER_MODEL", TOGETHER_DEFAULT_MODEL),
                 "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", OPENROUTER_DEFAULT_MODEL),
                 "cometapi": ("COMETAPI_API_KEY", "COMETAPI_MODEL", COMETAPI_DEFAULT_MODEL),
+                "aimlapi": ("AIMLAPI_API_KEY", "AIMLAPI_MODEL", AIMLAPI_DEFAULT_MODEL),
             }
             requested_provider = clean_scalar(payload.get("provider")).lower() if "provider" in payload else ""
             key_probe = api_key.strip()
@@ -692,7 +718,8 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
             RUNTIME_CONFIG[key_name] = api_key
             if provider == "openai" and not key_probe_lower.startswith("sk-proj-"):
                 RUNTIME_CONFIG["COMETAPI_API_KEY"] = api_key
-                RUNTIME_CONFIG["AI_ENGINE_PROVIDERS"] = "openai,cometapi"
+                RUNTIME_CONFIG["AIMLAPI_API_KEY"] = api_key
+                RUNTIME_CONFIG["AI_ENGINE_PROVIDERS"] = "cometapi,openai,aimlapi"
             else:
                 RUNTIME_CONFIG["AI_ENGINE_PROVIDERS"] = provider
             RUNTIME_CONFIG["AI_ENGINE_STRATEGY"] = "ordered"
@@ -958,9 +985,11 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
         )
     elif ai_errors:
         local_candidate["parserMode"] = "Local Smart Parser • AI fallback"
+        attempted = ", ".join(select_ai_engines()) or "AI"
         local_candidate["parseWarnings"] = dedupe(
             [
-                f"AI parser belum berhasil: {ai_errors[0]} Hasil sementara memakai Smart Parser lokal.",
+                f"AI parser belum berhasil setelah mencoba {attempted}: {' | '.join(ai_errors[:3])} Hasil sementara memakai Smart Parser lokal.",
+                "Jika API key berasal dari provider all-in/gateway lain, masukkan nama provider atau base URL agar endpoint bisa dipasang.",
                 *local_candidate.get("parseWarnings", []),
             ]
         )
@@ -990,6 +1019,8 @@ def parse_resume_with_multi_engine(
             candidate = parse_resume_with_openrouter(filename, text, local_candidate, errors)
         elif engine == "cometapi":
             candidate = parse_resume_with_cometapi(filename, text, local_candidate, errors)
+        elif engine == "aimlapi":
+            candidate = parse_resume_with_aimlapi(filename, text, local_candidate, errors)
         else:
             continue
         if candidate:
@@ -1412,6 +1443,32 @@ def parse_resume_with_cometapi(
     return None
 
 
+def parse_resume_with_aimlapi(
+    filename: str,
+    text: str,
+    local_candidate: dict[str, Any],
+    errors: list[str] | None = None,
+) -> dict[str, Any] | None:
+    if not get_aimlapi_api_key():
+        return None
+    if len(text.strip()) < 40:
+        if errors is not None:
+            errors.append("AIMLAPI: teks CV terlalu pendek untuk parser text-only.")
+        return None
+
+    prompt = build_resume_prompt(filename, text, local_candidate)
+    try:
+        parsed = call_aimlapi_json(prompt, gemini_resume_schema(), "resume_parse", temperature=0.1, timeout=75)
+        if isinstance(parsed, dict):
+            parsed["parserMode"] = f"AIMLAPI Structured Parser • {parsed.get('model', get_aimlapi_model())}"
+            parsed.setdefault("warnings", [])
+            return parsed
+    except Exception as exc:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"AIMLAPI {get_aimlapi_model()}: {str(exc)[:180]}.")
+    return None
+
+
 def parse_resume_with_gemini(
     filename: str,
     text: str,
@@ -1749,6 +1806,63 @@ def call_cometapi_json(
     return None
 
 
+def call_aimlapi_json(
+    prompt: str,
+    schema: dict[str, Any],
+    schema_name: str,
+    temperature: float = 0.2,
+    timeout: int = 75,
+) -> dict[str, Any] | None:
+    api_key = get_aimlapi_api_key()
+    if not api_key:
+        return None
+
+    model = get_aimlapi_model()
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return only valid JSON matching the schema. Do not add markdown or commentary.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": 3600,
+        "response_format": {"type": "json_object"},
+    }
+    request = urllib.request.Request(
+        f"{get_aimlapi_base_url()}/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with urlopen_direct(request, timeout=timeout) as response:  # noqa: S310
+                response_payload = json.loads(response.read().decode("utf-8"))
+            parsed = extract_json_from_chat_completions_response(response_payload)
+            if isinstance(parsed, dict):
+                parsed.setdefault("model", model)
+                return parsed
+            return None
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                raise RuntimeError(format_openai_compatible_http_error("AIMLAPI", model, exc)) from exc
+            time.sleep(1.5 * (attempt + 1))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+            last_error = exc
+            if attempt == 2:
+                raise RuntimeError(f"AIMLAPI {model}: {type(exc).__name__} - {str(exc)[:180]}.") from exc
+            time.sleep(1.5 * (attempt + 1))
+    if last_error:
+        raise RuntimeError(str(last_error))
+    return None
+
+
 def call_multi_engine_json(prompt: str, schema: dict[str, Any], schema_name: str, temperature: float = 0.2, timeout: int = 75) -> dict[str, Any] | None:
     errors: list[str] = []
     for engine in select_ai_engines():
@@ -1763,6 +1877,8 @@ def call_multi_engine_json(prompt: str, schema: dict[str, Any], schema_name: str
                 parsed = call_openrouter_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
             elif engine == "cometapi":
                 parsed = call_cometapi_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
+            elif engine == "aimlapi":
+                parsed = call_aimlapi_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
             else:
                 parsed = None
             if parsed:
@@ -1883,6 +1999,8 @@ def title_engine(engine: Any) -> str:
         return "OpenRouter"
     if value == "cometapi":
         return "CometAPI"
+    if value == "aimlapi":
+        return "AIMLAPI"
     return "AI"
 
 
