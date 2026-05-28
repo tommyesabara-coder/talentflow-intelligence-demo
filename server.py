@@ -42,6 +42,7 @@ OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
 SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx"}
+RESUME_PARSER_VERSION = "accurate-parser-2"
 PARSE_CACHE: dict[str, dict[str, Any]] = {}
 PARSE_CACHE_MAX_ITEMS = 120
 RUNTIME_CONFIG: dict[str, str] = {}
@@ -965,7 +966,7 @@ def extract_legacy_doc_text(raw: bytes) -> str:
 
 
 def resume_file_hash(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+    return hashlib.sha256(RESUME_PARSER_VERSION.encode("utf-8") + b":" + raw).hexdigest()
 
 
 def clone_jsonable(value: dict[str, Any]) -> dict[str, Any]:
@@ -1074,7 +1075,8 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
         return local_candidate
 
     ai_errors: list[str] = []
-    ai_text = build_hybrid_resume_text(text, local_candidate) if hybrid_fast_parser_enabled() else text
+    normalized_text = clean_extracted_text(text)
+    ai_text = normalized_text if len(normalized_text) <= 24000 else build_hybrid_resume_text(text, local_candidate, limit=18000)
     ai_candidate = parse_resume_with_multi_engine(filename, ai_text, local_candidate, raw, extension, ai_errors)
 
     if ai_candidate:
@@ -2231,10 +2233,17 @@ def normalize_fit_score_scale(score_payload: dict[str, Any]) -> None:
 def build_resume_prompt(filename: str, text: str, local_candidate: dict[str, Any]) -> str:
     return f"""
 You are an expert Indonesian recruitment resume parser.
-Extract facts only from the CV. Do not invent missing values.
-The candidate name must be a person name, not a job title, company name, section heading, or filename label.
-Calculate total work experience from employment date ranges when possible.
-If the CV contains overlapping jobs, count overlapping months once.
+Extract facts only from the CV text, not from assumption. Use the local parser draft only as a hint; it is not evidence.
+
+Accuracy rules:
+- The candidate name must be a person name shown in the CV, not a job title, company name, section heading, email username, or filename label.
+- If the CV has an explicit total such as "4 years of experience", set experience=4 and experienceMonths=48.
+- Calculate total work experience from employment date ranges when possible. If jobs overlap, count overlapping months once.
+- If experience is known in years but exact months are not shown, set experienceMonths = experience * 12. Never return experienceMonths=0 when experience > 0.
+- Extract companies and jobTitles from the employment/work history section only. If no company is visible, return [].
+- Extract education from the education/pendidikan section only. If no education is visible, return "".
+- Every important field should include short evidence.source explaining the exact CV line/section.
+- Use Bahasa Indonesia for summary, warnings, and evidence.source.
 Return JSON only.
 
 Filename: {filename}
@@ -2256,6 +2265,18 @@ def gemini_resume_schema() -> dict[str, Any]:
             "education": {"type": "string"},
             "companies": {"type": "array", "items": {"type": "string"}},
             "jobTitles": {"type": "array", "items": {"type": "string"}},
+            "workExperience": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "companyName": {"type": "string"},
+                        "positionTitle": {"type": "string"},
+                        "startDate": {"type": "string"},
+                        "endDate": {"type": "string"},
+                    },
+                },
+            },
             "experience": {"type": "integer"},
             "experienceMonths": {"type": "integer"},
             "skills": {"type": "array", "items": {"type": "string"}},
@@ -2433,6 +2454,7 @@ def parse_json_string(value: str) -> Any:
 
 
 def merge_ai_candidate(local_candidate: dict[str, Any], ai_candidate: dict[str, Any]) -> dict[str, Any]:
+    ai_candidate = normalize_ai_candidate_payload(ai_candidate)
     merged = dict(local_candidate)
     ai_confidence = float(ai_candidate.get("confidence") or 0)
     field_confidence = {**local_candidate.get("fieldConfidence", {}), **(ai_candidate.get("fieldConfidence") or {})}
@@ -2444,7 +2466,11 @@ def merge_ai_candidate(local_candidate: dict[str, Any], ai_candidate: dict[str, 
             return ai_value
         return local_value
 
-    merged["name"] = choose_text("name") or local_candidate.get("name")
+    ai_name = clean_scalar(ai_candidate.get("name"))
+    if ai_name and is_plausible_name(ai_name) and candidate_name_supported(ai_name, local_candidate):
+        merged["name"] = ai_name
+    else:
+        merged["name"] = local_candidate.get("name") or (ai_name if is_plausible_name(ai_name) else "")
     merged["email"] = choose_text("email") or local_candidate.get("email")
     merged["phone"] = choose_text("phone") or local_candidate.get("phone")
     merged["education"] = choose_text("education") or local_candidate.get("education")
@@ -2456,11 +2482,20 @@ def merge_ai_candidate(local_candidate: dict[str, Any], ai_candidate: dict[str, 
 
     ai_months = safe_months(ai_candidate.get("experienceMonths"))
     local_months = safe_months(local_candidate.get("experienceMonths"))
-    months = max(ai_months, local_months)
     ai_years = safe_int(ai_candidate.get("experience"))
     local_years = safe_int(local_candidate.get("experience"))
+    if not ai_months and ai_years:
+        ai_months = ai_years * 12
+    ai_exp_conf = float((ai_candidate.get("fieldConfidence") or {}).get("experience") or ai_confidence or 0)
+    local_exp_conf = float((local_candidate.get("fieldConfidence") or {}).get("experience") or 0)
+    if ai_months and (ai_exp_conf >= 0.55 or not local_months):
+        months = ai_months
+    elif local_months:
+        months = local_months
+    else:
+        months = max(ai_years, local_years) * 12
     merged["experienceMonths"] = months
-    merged["experience"] = max(ai_years, local_years, round(months / 12))
+    merged["experience"] = round(months / 12) if months else max(ai_years, local_years)
     merged["rawExperience"] = months_to_label(months) if months else local_candidate.get("rawExperience", "")
     merged["parserMode"] = ai_candidate.get("parserMode", "OpenAI Structured Parser")
     merged["parseConfidence"] = round(max(ai_confidence, float(local_candidate.get("parseConfidence") or 0)), 2)
@@ -2468,6 +2503,53 @@ def merge_ai_candidate(local_candidate: dict[str, Any], ai_candidate: dict[str, 
     merged["parseEvidence"] = [*(ai_candidate.get("evidence") or []), *(local_candidate.get("parseEvidence") or [])][:12]
     merged["parseWarnings"] = dedupe([*(ai_candidate.get("warnings") or []), *(local_candidate.get("parseWarnings") or [])])[:8]
     return merged
+
+
+def normalize_ai_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(candidate)
+    years = safe_int(normalized.get("experience"))
+    months = safe_months(normalized.get("experienceMonths"))
+    history_months = calculate_history_months_from_ai(normalized)
+    if history_months:
+        months = history_months
+        normalized.setdefault("experience", round(history_months / 12))
+    if not months and years:
+        months = years * 12
+    if months:
+        normalized["experienceMonths"] = months
+        normalized["experience"] = round(months / 12)
+    normalized["companies"] = dedupe(safe_companies(normalized))[:8]
+    normalized["jobTitles"] = dedupe(safe_job_titles(normalized))[:8]
+    return normalized
+
+
+def calculate_history_months_from_ai(candidate: dict[str, Any]) -> int:
+    history = candidate.get("workExperience") or candidate.get("employmentHistory") or candidate.get("experiences")
+    if not isinstance(history, list):
+        return 0
+    pseudo_lines: list[str] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        start = clean_scalar(item.get("startDate") or item.get("start") or item.get("from"))
+        end = clean_scalar(item.get("endDate") or item.get("end") or item.get("to") or item.get("until"))
+        if start and end:
+            pseudo_lines.append(f"{start} - {end}")
+    if not pseudo_lines:
+        return 0
+    return int(calculate_date_range_experience_detail(pseudo_lines).get("months") or 0)
+
+
+def candidate_name_supported(name: str, local_candidate: dict[str, Any]) -> bool:
+    text = normalize_text(clean_scalar(local_candidate.get("cvText")))
+    filename = normalize_text(clean_scalar(local_candidate.get("fileName")))
+    email = normalize_text(clean_scalar(local_candidate.get("email")).split("@", 1)[0])
+    tokens = [token for token in re.findall(r"[a-z]{2,}", name.lower()) if token not in {"bin", "binti"}]
+    if not tokens:
+        return False
+    haystack = " ".join([text, filename, email])
+    hits = sum(1 for token in tokens if token in haystack)
+    return hits >= min(2, len(tokens))
 
 
 def clean_scalar(value: Any) -> str:
@@ -2630,6 +2712,8 @@ def find_explicit_experience_months(text: str) -> int:
     patterns = [
         r"(?:total\s*)?(?:pengalaman|experience|experiences|working experience|work experience)[^\d]{0,35}(\d{1,2})(?:[,.](\d))?\+?\s*(?:tahun|thn|years?|yrs?)",
         r"(\d{1,2})(?:[,.](\d))?\+?\s*(?:tahun|thn|years?|yrs?)\s*(?:pengalaman|experience|experiences)",
+        r"(\d{1,2})(?:[,.](\d))?\+?\s*(?:tahun|thn|years?|yrs?)\s+of\s+(?:working\s+|work\s+)?experience",
+        r"(?:over|more than|lebih dari)\s+(\d{1,2})(?:[,.](\d))?\+?\s*(?:tahun|thn|years?|yrs?)\s+(?:of\s+)?(?:working\s+|work\s+)?experience",
         r"berpengalaman[^\d]{0,25}(\d{1,2})(?:[,.](\d))?\+?\s*(?:tahun|thn|years?|yrs?)",
     ]
     for pattern in patterns:
