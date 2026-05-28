@@ -276,6 +276,7 @@ let candidateFitFilter = "all";
 let pendingStageSchedule = null;
 let importQueueRunning = false;
 let activeKpiFilter = "all";
+let scoringCandidateIds = new Set();
 
 const elements = {
   pipelineBoard: document.querySelector("#pipelineBoard"),
@@ -1543,7 +1544,7 @@ async function scoreCandidatesForBlueprint(blueprint) {
 
 function markAiScoringFailed(candidate, blueprint, error) {
   const previousScore = Number(candidate.aiFitScore?.score ?? candidate.score ?? 0);
-  candidate.score = previousScore || 0;
+  candidate.score = previousScore > 0 ? previousScore : null;
   candidate.scoreBreakdown = [
     `AI Fit Scoring belum berhasil: ${error.message}`,
     "Score final belum tersedia. Klik scoring ulang setelah API aktif/stabil.",
@@ -1551,7 +1552,7 @@ function markAiScoringFailed(candidate, blueprint, error) {
   candidate.aiFitScore = {
     blueprintId: blueprint.id,
     blueprintName: blueprint.positionName,
-    score: candidate.score,
+    score: candidate.score || 0,
     status: "AI scoring gagal",
     confidence: 0,
     componentScores: { responsibilityFit: 0, challengeFit: 0, requirementFit: 0 },
@@ -2239,7 +2240,8 @@ function createCandidateCard(candidate) {
   card.className = `candidate-card candidate-list-row candidate-command-card stage-${candidate.stage} ${isFollowUpRiskCandidate(candidate) ? "followup-risk" : ""} ${selectedCandidateIds.has(candidate.id) ? "selected" : ""}`;
   card.dataset.candidateId = candidate.id;
 
-  const scoreClass = candidate.score >= 85 ? "good" : candidate.score >= 75 ? "mid" : "low";
+  const scoreView = getCandidateScoreView(candidate);
+  const scoreClass = scoreView.className;
   const isClosed = ["hired", "rejected"].includes(candidate.stage);
   const nextStage = getNextStageLabel(candidate);
   const parseConfidenceLabel = getParseConfidenceLabel(candidate.parseConfidence);
@@ -2271,7 +2273,7 @@ function createCandidateCard(candidate) {
     </div>
 
     <div class="candidate-score-block command-score-block">
-      <span class="score-pill ${scoreClass}">Score ${escapeHtml(String(candidate.score))}</span>
+      <span class="score-pill ${scoreClass}">${escapeHtml(scoreView.label)}</span>
       <small>Current Stage: ${escapeHtml(currentStageLabel)}</small>
       <small>${escapeHtml(nextStage)}</small>
     </div>
@@ -3319,7 +3321,7 @@ function addCandidate(candidate) {
   const job = findJobByTitle(candidate.role);
   const hasAiBlueprint = Boolean(blueprint);
   const scoringResult = hasAiBlueprint
-    ? { score: Number(candidate.aiFitScore?.score ?? 0), breakdown: ["Menunggu AI Blueprint Fit Scoring."] }
+    ? { score: null, breakdown: ["Menunggu AI Blueprint Fit Scoring."] }
     : calculateScore(candidate);
   const score = scoringResult.score;
   const autoScreenThreshold = blueprint?.scoring.autoScreenThreshold ?? job?.scoring.autoScreenThreshold ?? 85;
@@ -3897,6 +3899,45 @@ async function scoreCandidateWithActiveBlueprint(candidate) {
   }
 }
 
+function maybeRunAiScoringForCandidate(candidate, options = {}) {
+  const blueprint = findActiveBlueprintByTitle(candidate.role);
+  if (!blueprint || scoringCandidateIds.has(candidate.id)) return;
+  const hasFinalAiScore = candidate.aiFitScore?.blueprintId === blueprint.id && Number(candidate.aiFitScore?.confidence || 0) > 0;
+  const needsScore = !hasFinalAiScore && (!Number(candidate.score) || candidate.aiFitScore?.status === "AI scoring gagal");
+  if (!needsScore) return;
+
+  scoringCandidateIds.add(candidate.id);
+  candidate.scoreBreakdown = ["AI Blueprint Fit Scoring sedang berjalan."];
+  saveState();
+  render();
+  scoreCandidateWithActiveBlueprint(candidate)
+    .then(() => {
+      saveState();
+      render();
+      if (options.refreshDetail && elements.detailDialog?.open) showDetails(candidate.id);
+    })
+    .finally(() => {
+      scoringCandidateIds.delete(candidate.id);
+    });
+}
+
+function getCandidateScoreView(candidate) {
+  if (scoringCandidateIds.has(candidate.id)) {
+    return { label: "AI scoring...", className: "mid" };
+  }
+  if (candidate.aiFitScore?.status === "AI scoring gagal") {
+    return { label: "AI gagal", className: "low" };
+  }
+  if (!Number(candidate.score)) {
+    return { label: "Belum discoring", className: "mid" };
+  }
+  const score = Number(candidate.score);
+  return {
+    label: `Score ${score}`,
+    className: score >= 85 ? "good" : score >= 75 ? "mid" : "low",
+  };
+}
+
 function applyReanalyzedCandidate(candidate, parsedCandidate = {}) {
   const preserved = {
     id: candidate.id,
@@ -3935,7 +3976,7 @@ function applyReanalyzedCandidate(candidate, parsedCandidate = {}) {
 
   Object.assign(candidate, merged, preserved);
   candidate.aiFitScore = null;
-  candidate.score = 0;
+  candidate.score = null;
   candidate.scoreBreakdown = ["Menunggu AI Blueprint Fit Scoring ulang."];
   candidate.history = [
     ...preserved.history,
@@ -4493,8 +4534,10 @@ function showDetails(candidateId) {
   const candidate = state.candidates.find((item) => item.id === candidateId);
   if (!candidate) return;
   const activeBlueprint = findActiveBlueprintByTitle(candidate.role);
+  maybeRunAiScoringForCandidate(candidate, { refreshDetail: true });
   const parseConfidenceLabel = getParseConfidenceLabel(candidate.parseConfidence);
-  const scoreClass = candidate.score >= 85 ? "good" : candidate.score >= 75 ? "mid" : "low";
+  const scoreView = getCandidateScoreView(candidate);
+  const scoreClass = scoreView.className;
   const profileFacts = [
     ["Source", candidate.source],
     ["Usia", candidate.age ? `${candidate.age} tahun` : "-"],
@@ -4526,7 +4569,7 @@ function showDetails(candidateId) {
         ${activeBlueprint ? `<small>Blueprint: ${escapeHtml(activeBlueprint.positionName)}${activeBlueprint.companyName ? ` · ${escapeHtml(activeBlueprint.companyName)}` : ""}</small>` : ""}
       </div>
       <div class="detail-score-stack">
-        <span class="score-pill ${scoreClass}">Score ${candidate.score}</span>
+        <span class="score-pill ${scoreClass}">${escapeHtml(scoreView.label)}</span>
         ${
           candidate.parserMode
             ? `<span class="parser-chip ${parseConfidenceLabel.className}">${escapeHtml(parseConfidenceLabel.label)}</span>
