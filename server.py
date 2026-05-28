@@ -36,13 +36,13 @@ COMETAPI_DEFAULT_MODEL = "gemini-2.5-flash"
 COMETAPI_DEFAULT_BASE_URL = "https://api.cometapi.com/v1"
 AIMLAPI_DEFAULT_MODEL = "gpt-4o-mini"
 AIMLAPI_DEFAULT_BASE_URL = "https://api.aimlapi.com/v1"
-LITELLM_DEFAULT_MODEL = "gpt-4o-mini"
+LITELLM_DEFAULT_MODEL = "gemini-2.5-pro"
 LITELLM_DEFAULT_BASE_URL = "https://lite.koboillm.com"
 OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
 SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx"}
-RESUME_PARSER_VERSION = "ai-parser-scoring-3"
+RESUME_PARSER_VERSION = "ai-parser-scoring-pro-4"
 PARSE_CACHE: dict[str, dict[str, Any]] = {}
 PARSE_CACHE_MAX_ITEMS = 120
 RUNTIME_CONFIG: dict[str, str] = {}
@@ -416,6 +416,8 @@ def openai_compatible_urls(base_url: str, suffix: str) -> list[str]:
 def discover_litellm_model(api_key: str, base_url: str) -> str:
     """Best effort: ask the Team Model gateway which model alias is available."""
     preferred_fragments = (
+        "gemini-2.5-pro",
+        "gemini-3-pro",
         "gemini-2.5-flash",
         "gemini",
         "gpt-4o-mini",
@@ -2304,6 +2306,14 @@ def normalize_fit_score_payload(
                 + safe_int(components.get("challengeFit")) * 0.3
                 + safe_int(components.get("requirementFit")) * 0.3
             )
+    if safe_int(score_payload.get("score")) == 0:
+        score_payload["score"] = infer_score_from_ai_text(
+            clean_scalar(score_payload.get("status")),
+            clean_scalar(score_payload.get("executiveSummary") or score_payload.get("reason")),
+        )
+    for key in ("responsibilityFit", "challengeFit", "requirementFit"):
+        if safe_int(components.get(key)) == 0:
+            components[key] = safe_int(score_payload.get("score"))
 
     if not isinstance(score_payload.get("inferences"), list):
         inferences: list[dict[str, Any]] = []
@@ -2392,6 +2402,8 @@ def normalize_fit_score_payload(
     fill_missing_job_needs(normalized_matrix, blueprint_payload or {})
     summary_for_rows = clean_scalar(score_payload.get("executiveSummary") or score_payload.get("reason"))
     for row in normalized_matrix:
+        if not row.get("cvEvidence") and candidate_payload:
+            row["cvEvidence"] = summarize_candidate_evidence(candidate_payload)
         if not row.get("fitAnalysis") and candidate_payload:
             row["fitAnalysis"] = build_fit_analysis_sentence(
                 row.get("category") or "Analisis",
@@ -2401,6 +2413,14 @@ def normalize_fit_score_payload(
             )
         if not row.get("riskOrGap") and candidate_payload:
             row["riskOrGap"] = infer_comparison_gap(row.get("jobNeed") or "", candidate_payload)
+        if safe_int(row.get("score")) == 0:
+            category = normalize_text(row.get("category") or "")
+            component_key = "requirementFit"
+            if "tanggung" in category or "responsib" in category:
+                component_key = "responsibilityFit"
+            elif "tantangan" in category or "challenge" in category:
+                component_key = "challengeFit"
+            row["score"] = safe_int(components.get(component_key) or score_payload.get("score"))
     score_payload["comparisonMatrix"] = [row for row in normalized_matrix if row.get("fitAnalysis") or row.get("jobNeed")][:12]
 
     if not isinstance(score_payload.get("gaps"), list):
@@ -2421,6 +2441,19 @@ def normalize_fit_score_payload(
         score_payload["confidence"] = float(score_payload.get("confidence") or 0.82)
     except (TypeError, ValueError):
         score_payload["confidence"] = 0.82
+
+
+def infer_score_from_ai_text(status: str, text: str) -> int:
+    haystack = normalize_text(f"{status} {text}")
+    if any(term in haystack for term in ("sangat sesuai", "sangat tinggi", "sangat kuat", "excellent", "highly suitable")):
+        return 92
+    if any(term in haystack for term in ("cukup sesuai", "sesuai", "kuat", "relevan", "tinggi")):
+        return 82
+    if any(term in haystack for term in ("potensial", "cukup", "sedang", "perlu validasi")):
+        return 66
+    if any(term in haystack for term in ("berisiko", "rendah", "tidak sesuai", "lemah")):
+        return 45
+    return 60
 
 
 def build_ai_fit_comparison_fallback(
