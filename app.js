@@ -1570,6 +1570,7 @@ function applyBlueprintFitScore(candidate, blueprint, fitScore = {}) {
   candidate.score = score;
   candidate.scoreBreakdown = [
     `Blueprint Fit Score: ${score}/100 • ${fitScore.status || "Dinilai AI"}`,
+    ...(fitScore.executiveSummary ? [fitScore.executiveSummary] : []),
     `Tanggung jawab utama fit: ${componentScores.responsibilityFit ?? "-"} / 100`,
     `Tantangan jabatan fit: ${componentScores.challengeFit ?? "-"} / 100`,
     `Persyaratan jabatan fit: ${componentScores.requirementFit ?? "-"} / 100`,
@@ -1583,6 +1584,8 @@ function applyBlueprintFitScore(candidate, blueprint, fitScore = {}) {
     status: fitScore.status || "Dinilai AI",
     confidence: Number(fitScore.confidence ?? 0),
     componentScores,
+    executiveSummary: fitScore.executiveSummary || "",
+    comparisonMatrix: Array.isArray(fitScore.comparisonMatrix) ? fitScore.comparisonMatrix : [],
     reasons: normalizeLines(fitScore.reasons),
     inferences: Array.isArray(fitScore.inferences) ? fitScore.inferences : [],
     gaps: normalizeLines(fitScore.gaps),
@@ -4646,14 +4649,43 @@ function renderBlueprintFitInsight(candidate) {
   if (!fit) return "";
   const componentScores = fit.componentScores ?? {};
   const inferences = Array.isArray(fit.inferences) ? fit.inferences : [];
+  const comparisonMatrix = Array.isArray(fit.comparisonMatrix) ? fit.comparisonMatrix : [];
   return `
     <section class="detail-card">
-      <h4>AI Blueprint Fit Reasoning</h4>
+      <h4>AI Jobdesc vs CV Reasoning</h4>
+      ${fit.executiveSummary ? `<p class="detail-summary-copy">${escapeHtml(fit.executiveSummary)}</p>` : ""}
       <div class="fit-score-grid">
         <span><strong>${componentScores.responsibilityFit ?? "-"}</strong>Tanggung jawab</span>
         <span><strong>${componentScores.challengeFit ?? "-"}</strong>Tantangan</span>
         <span><strong>${componentScores.requirementFit ?? "-"}</strong>Persyaratan</span>
       </div>
+      ${
+        comparisonMatrix.length
+          ? `<div class="ai-comparison-list">${comparisonMatrix
+              .slice(0, 8)
+              .map(
+                (item) => `
+                  <div class="ai-comparison-item">
+                    <div class="ai-comparison-head">
+                      <span>${escapeHtml(item.category || "Analisis")}</span>
+                      <strong>${escapeHtml(String(item.score || "-"))}</strong>
+                    </div>
+                    <dl>
+                      <dt>Jobdesc</dt>
+                      <dd>${escapeHtml(item.jobNeed || "-")}</dd>
+                      <dt>Bukti CV</dt>
+                      <dd>${escapeHtml(item.cvEvidence || "Belum tertulis eksplisit di CV")}</dd>
+                      <dt>Analisa AI</dt>
+                      <dd>${escapeHtml(item.fitAnalysis || "-")}</dd>
+                      <dt>Evidence</dt>
+                      <dd>${escapeHtml(item.evidenceLevel || "Analisis AI")}${item.riskOrGap ? ` · Risk: ${escapeHtml(item.riskOrGap)}` : ""}</dd>
+                    </dl>
+                  </div>
+                `,
+              )
+              .join("")}</div>`
+          : ""
+      }
       ${
         inferences.length
           ? `<div class="parse-audit-list">${inferences

@@ -2165,8 +2165,13 @@ Important scoring rule:
 - If a capability is not written explicitly but is strongly implied by job history, mark it as "Strong inference", not "Not found".
 - Do not invent facts. Separate direct evidence from professional inference.
 - Include risks and validation questions for interview.
+- Make the scoring reason comprehensive and recruiter-ready.
+- Compare Job Blueprint vs CV point-by-point: for each main responsibility, role challenge, and job requirement, explain (1) what the job needs, (2) what CV evidence supports or does not support it, (3) fit interpretation, (4) evidence level, (5) risk/gap, and (6) score 0-100.
+- If CV evidence is indirect, say it is an inference and explain why it is reasonable.
+- If CV evidence is missing, do not punish automatically when seniority/role history strongly implies capability; mark it as interview validation.
 - Use these Indonesian evidenceLevel labels when appropriate: "Bukti langsung", "Inferensi kuat", "Inferensi lemah", "Tidak ditemukan".
 - Use Indonesian status labels such as "Sangat Sesuai", "Cukup Sesuai", "Potensial", or "Berisiko".
+- Return a concise executiveSummary and a detailed comparisonMatrix.
 
 Weights:
 - Tanggung Jawab Utama Fit: 40%
@@ -2191,8 +2196,10 @@ CANDIDATE PROFILE AND CV TEXT:
     parsed = call_multi_engine_json(prompt, gemini_fit_score_schema(), "blueprint_fit_score", temperature=0.12, timeout=90)
     if not parsed:
         return None
-    normalize_fit_score_payload(parsed)
+    normalize_fit_score_payload(parsed, candidate_payload, blueprint_payload)
     normalize_fit_score_scale(parsed)
+    if not parsed.get("comparisonMatrix"):
+        parsed["comparisonMatrix"] = build_ai_fit_comparison_fallback(candidate_payload, blueprint_payload, parsed)
     parsed["parserMode"] = f"{title_engine(parsed.get('engine'))} Blueprint Fit Scoring â€¢ {parsed.get('model', get_gemini_resume_model())}"
     return parsed
 
@@ -2233,9 +2240,29 @@ def normalize_fit_score_scale(score_payload: dict[str, Any]) -> None:
             components[key] = normalize_score(components.get(key))
 
 
-def normalize_fit_score_payload(score_payload: dict[str, Any]) -> None:
+def normalize_fit_score_payload(
+    score_payload: dict[str, Any],
+    candidate_payload: dict[str, Any] | None = None,
+    blueprint_payload: dict[str, Any] | None = None,
+) -> None:
     if not score_payload.get("status"):
         score_payload["status"] = clean_scalar(score_payload.get("overallStatus")) or "Dinilai AI"
+
+    if not score_payload.get("executiveSummary"):
+        summary_source = score_payload.get("summary") or score_payload.get("reason") or score_payload.get("overallReason") or score_payload.get("analysisSummary")
+    else:
+        summary_source = score_payload.get("executiveSummary")
+    if isinstance(summary_source, dict):
+        score_payload["executiveSummary"] = clean_scalar(
+            summary_source.get("reason")
+            or summary_source.get("summary")
+            or summary_source.get("executiveSummary")
+            or summary_source.get("analysis")
+        )
+        score_payload.setdefault("score", summary_source.get("totalScore") or summary_source.get("score"))
+        score_payload.setdefault("status", clean_scalar(summary_source.get("status")))
+    else:
+        score_payload["executiveSummary"] = clean_scalar(summary_source)
 
     reasons = score_payload.get("reasons")
     if not isinstance(reasons, list) or not reasons:
@@ -2258,9 +2285,9 @@ def normalize_fit_score_payload(score_payload: dict[str, Any]) -> None:
                 return value
         return 0
 
-    components["responsibilityFit"] = nested_score("responsibilityFit", "mainResponsibilitiesFit", "mainResponsibilityFit")
-    components["challengeFit"] = nested_score("challengeFit", "roleChallengesFit", "challengeFit")
-    components["requirementFit"] = nested_score("requirementFit", "jobRequirementsFit", "requirementFit")
+    components["responsibilityFit"] = nested_score("responsibilityFit", "mainResponsibilitiesFit", "mainResponsibilityFit", "tanggungJawabUtamaFit")
+    components["challengeFit"] = nested_score("challengeFit", "roleChallengesFit", "tantanganJabatanFit")
+    components["requirementFit"] = nested_score("requirementFit", "jobRequirementsFit", "persyaratanJabatanFit")
 
     if score_payload.get("score") in (None, "", 0):
         explicit_score = (
@@ -2297,6 +2324,85 @@ def normalize_fit_score_payload(score_payload: dict[str, Any]) -> None:
                 )
         score_payload["inferences"] = [item for item in inferences if item.get("reason")]
 
+    matrix = score_payload.get("comparisonMatrix") or score_payload.get("comparison") or score_payload.get("fitComparison")
+    normalized_matrix: list[dict[str, Any]] = []
+    if isinstance(matrix, list):
+        for item in matrix:
+            if not isinstance(item, dict):
+                continue
+            normalized_matrix.append(
+                {
+                    "category": clean_scalar(item.get("category") or item.get("area") or item.get("section")),
+                    "jobNeed": clean_scalar(
+                        item.get("jobNeed")
+                        or item.get("jobRequirement")
+                        or item.get("blueprintNeed")
+                        or item.get("requirement")
+                        or item.get("jobDesc")
+                        or item.get("jobDesk")
+                        or item.get("blueprintPoint")
+                        or item.get("point")
+                        or item.get("criteria")
+                    ),
+                    "cvEvidence": clean_scalar(item.get("cvEvidence") or item.get("candidateEvidence") or item.get("evidence")),
+                    "fitAnalysis": clean_scalar(item.get("fitAnalysis") or item.get("analysis") or item.get("reason") or item.get("inference")),
+                    "evidenceLevel": clean_scalar(item.get("evidenceLevel")) or "Analisis AI",
+                    "riskOrGap": clean_scalar(item.get("riskOrGap") or item.get("risk") or item.get("gap")),
+                    "score": safe_int(item.get("score")),
+                }
+            )
+    if not normalized_matrix:
+        for key, category in (
+            ("mainResponsibilitiesFit", "Tanggung jawab utama"),
+            ("roleChallengesFit", "Tantangan jabatan"),
+            ("jobRequirementsFit", "Persyaratan jabatan"),
+        ):
+            value = components.get(key)
+            if isinstance(value, dict):
+                breakdown = value.get("breakdown")
+                if isinstance(breakdown, list) and breakdown:
+                    for row in breakdown:
+                        if not isinstance(row, dict):
+                            continue
+                        normalized_matrix.append(
+                            {
+                                "category": category,
+                                "jobNeed": clean_scalar(row.get("responsibility") or row.get("challenge") or row.get("requirement") or row.get("jobNeed")),
+                                "cvEvidence": clean_scalar(row.get("candidateEvidence") or row.get("cvEvidence")),
+                                "fitAnalysis": clean_scalar(row.get("inference") or row.get("reason") or value.get("reason")),
+                                "evidenceLevel": clean_scalar(row.get("evidenceLevel") or value.get("evidenceLevel")) or "Analisis AI",
+                                "riskOrGap": clean_scalar(row.get("risk") or row.get("gap")),
+                                "score": safe_int(row.get("score") or value.get("score")),
+                            }
+                        )
+                else:
+                    normalized_matrix.append(
+                        {
+                            "category": category,
+                            "jobNeed": category,
+                            "cvEvidence": "",
+                            "fitAnalysis": clean_scalar(value.get("reason")),
+                            "evidenceLevel": clean_scalar(value.get("evidenceLevel")) or "Analisis AI",
+                            "riskOrGap": "",
+                            "score": safe_int(value.get("score")),
+                        }
+                    )
+    if not normalized_matrix and candidate_payload and blueprint_payload:
+        normalized_matrix = build_ai_fit_comparison_fallback(candidate_payload, blueprint_payload, score_payload)
+    fill_missing_job_needs(normalized_matrix, blueprint_payload or {})
+    summary_for_rows = clean_scalar(score_payload.get("executiveSummary") or score_payload.get("reason"))
+    for row in normalized_matrix:
+        if not row.get("fitAnalysis") and candidate_payload:
+            row["fitAnalysis"] = build_fit_analysis_sentence(
+                row.get("category") or "Analisis",
+                row.get("jobNeed") or "",
+                candidate_payload,
+                summary_for_rows,
+            )
+        if not row.get("riskOrGap") and candidate_payload:
+            row["riskOrGap"] = infer_comparison_gap(row.get("jobNeed") or "", candidate_payload)
+    score_payload["comparisonMatrix"] = [row for row in normalized_matrix if row.get("fitAnalysis") or row.get("jobNeed")][:12]
+
     if not isinstance(score_payload.get("gaps"), list):
         risks = score_payload.get("risks")
         score_payload["gaps"] = [clean_scalar(item) for item in risks if clean_scalar(item)] if isinstance(risks, list) else []
@@ -2315,6 +2421,129 @@ def normalize_fit_score_payload(score_payload: dict[str, Any]) -> None:
         score_payload["confidence"] = float(score_payload.get("confidence") or 0.82)
     except (TypeError, ValueError):
         score_payload["confidence"] = 0.82
+
+
+def build_ai_fit_comparison_fallback(
+    candidate_payload: dict[str, Any],
+    blueprint_payload: dict[str, Any],
+    score_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Create a readable Jobdesc-vs-CV matrix when the model only returns summary scores."""
+    components = score_payload.get("componentScores") if isinstance(score_payload.get("componentScores"), dict) else {}
+    summary = clean_scalar(score_payload.get("executiveSummary") or score_payload.get("reason"))
+    candidate_evidence = summarize_candidate_evidence(candidate_payload)
+    rows: list[dict[str, Any]] = []
+
+    section_map = [
+        ("Tanggung jawab utama", "mainResponsibilities", "responsibilityFit"),
+        ("Tantangan jabatan", "roleChallenges", "challengeFit"),
+        ("Persyaratan jabatan", "jobRequirements", "requirementFit"),
+    ]
+    for category, blueprint_key, score_key in section_map:
+        needs = blueprint_payload.get(blueprint_key)
+        if not isinstance(needs, list):
+            needs = [needs] if needs else []
+        for need in needs[:4]:
+            job_need = clean_scalar(need)
+            if not job_need:
+                continue
+            rows.append(
+                {
+                    "category": category,
+                    "jobNeed": job_need,
+                    "cvEvidence": candidate_evidence,
+                    "fitAnalysis": build_fit_analysis_sentence(category, job_need, candidate_payload, summary),
+                    "evidenceLevel": infer_evidence_level(job_need, candidate_payload),
+                    "riskOrGap": infer_comparison_gap(job_need, candidate_payload),
+                    "score": safe_int(components.get(score_key) or score_payload.get("score")),
+                }
+            )
+    return rows
+
+
+def fill_missing_job_needs(rows: list[dict[str, Any]], blueprint_payload: dict[str, Any]) -> None:
+    needs_by_category = {
+        "tanggung": safe_string_list(blueprint_payload.get("mainResponsibilities")),
+        "tantangan": safe_string_list(blueprint_payload.get("roleChallenges")),
+        "persyaratan": safe_string_list(blueprint_payload.get("jobRequirements")),
+    }
+    used = {key: 0 for key in needs_by_category}
+    for row in rows:
+        if row.get("jobNeed"):
+            continue
+        category = normalize_text(row.get("category") or "")
+        key = "persyaratan"
+        if "tanggung" in category or "responsib" in category:
+            key = "tanggung"
+        elif "tantangan" in category or "challenge" in category:
+            key = "tantangan"
+        needs = needs_by_category.get(key) or []
+        index = min(used.get(key, 0), max(len(needs) - 1, 0))
+        if needs:
+            row["jobNeed"] = needs[index]
+            used[key] = used.get(key, 0) + 1
+
+
+def summarize_candidate_evidence(candidate_payload: dict[str, Any]) -> str:
+    parts = []
+    if candidate_payload.get("rawExperience") or candidate_payload.get("experience"):
+        parts.append(f"Pengalaman {candidate_payload.get('rawExperience') or str(candidate_payload.get('experience')) + ' tahun'}")
+    titles = safe_string_list(candidate_payload.get("jobTitles"))
+    companies = safe_string_list(candidate_payload.get("companies"))
+    skills = safe_string_list(candidate_payload.get("skills"))
+    if titles:
+        parts.append(f"Jabatan: {', '.join(titles[:3])}")
+    if companies:
+        parts.append(f"Perusahaan: {', '.join(companies[:3])}")
+    if candidate_payload.get("education"):
+        parts.append(f"Pendidikan: {clean_scalar(candidate_payload.get('education'))}")
+    if skills:
+        parts.append(f"Skill: {', '.join(skills[:6])}")
+    if candidate_payload.get("summary"):
+        parts.append(f"Ringkasan CV: {clean_scalar(candidate_payload.get('summary'))[:220]}")
+    return " | ".join(parts) if parts else "Bukti CV belum terbaca lengkap."
+
+
+def build_fit_analysis_sentence(category: str, job_need: str, candidate_payload: dict[str, Any], summary: str) -> str:
+    evidence_level = infer_evidence_level(job_need, candidate_payload)
+    if evidence_level == "Bukti langsung":
+        return f"Kebutuhan '{job_need}' memiliki sinyal langsung dari CV kandidat. {summary[:260]}"
+    if evidence_level == "Inferensi kuat":
+        return f"Kebutuhan '{job_need}' tidak selalu tertulis dengan kata yang sama, tetapi dapat diinferensikan kuat dari senioritas, jabatan, dan pola pengalaman kandidat. {summary[:240]}"
+    if evidence_level == "Inferensi lemah":
+        return f"Kebutuhan '{job_need}' hanya memiliki sinyal terbatas di CV; perlu validasi lebih jauh saat interview."
+    return f"Kebutuhan '{job_need}' belum ditemukan jelas di CV; jadikan area validasi utama saat interview."
+
+
+def infer_evidence_level(job_need: str, candidate_payload: dict[str, Any]) -> str:
+    need_terms = set(re.findall(r"[a-zA-Z]{4,}", normalize_text(job_need)))
+    evidence_text = normalize_text(
+        " ".join(
+            [
+                clean_scalar(candidate_payload.get("summary")),
+                " ".join(safe_string_list(candidate_payload.get("jobTitles"))),
+                " ".join(safe_string_list(candidate_payload.get("skills"))),
+                " ".join(safe_string_list(candidate_payload.get("companies"))),
+                clean_scalar(candidate_payload.get("education")),
+                clean_scalar(candidate_payload.get("cvText"))[:3000],
+            ]
+        )
+    )
+    hits = sum(1 for term in need_terms if term in evidence_text)
+    if hits >= 2:
+        return "Bukti langsung"
+    if safe_int(candidate_payload.get("experience")) >= 5 and any(title for title in safe_string_list(candidate_payload.get("jobTitles"))):
+        return "Inferensi kuat"
+    if hits == 1:
+        return "Inferensi lemah"
+    return "Tidak ditemukan"
+
+
+def infer_comparison_gap(job_need: str, candidate_payload: dict[str, Any]) -> str:
+    evidence_level = infer_evidence_level(job_need, candidate_payload)
+    if evidence_level in {"Bukti langsung", "Inferensi kuat"}:
+        return "Tidak ada gap besar; validasi contoh kasus konkret saat interview."
+    return "Belum ada bukti kuat di CV; perlu pertanyaan pendalaman saat interview."
 
 
 def build_resume_prompt(filename: str, text: str, local_candidate: dict[str, Any]) -> str:
@@ -2420,6 +2649,7 @@ def gemini_fit_score_schema() -> dict[str, Any]:
             "score": {"type": "integer"},
             "status": {"type": "string"},
             "confidence": {"type": "number"},
+            "executiveSummary": {"type": "string"},
             "componentScores": {
                 "type": "object",
                 "properties": {
@@ -2430,6 +2660,21 @@ def gemini_fit_score_schema() -> dict[str, Any]:
                 "required": ["responsibilityFit", "challengeFit", "requirementFit"],
             },
             "reasons": {"type": "array", "items": {"type": "string"}},
+            "comparisonMatrix": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                        "jobNeed": {"type": "string"},
+                        "cvEvidence": {"type": "string"},
+                        "fitAnalysis": {"type": "string"},
+                        "evidenceLevel": {"type": "string"},
+                        "riskOrGap": {"type": "string"},
+                        "score": {"type": "integer"},
+                    },
+                },
+            },
             "inferences": {
                 "type": "array",
                 "items": {
