@@ -36,6 +36,8 @@ COMETAPI_DEFAULT_MODEL = "gemini-2.5-flash"
 COMETAPI_DEFAULT_BASE_URL = "https://api.cometapi.com/v1"
 AIMLAPI_DEFAULT_MODEL = "gpt-4o-mini"
 AIMLAPI_DEFAULT_BASE_URL = "https://api.aimlapi.com/v1"
+LITELLM_DEFAULT_MODEL = "gpt-4o-mini"
+LITELLM_DEFAULT_BASE_URL = "https://lite.koboillm.com"
 OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
@@ -134,7 +136,7 @@ def load_runtime_config() -> dict[str, str]:
     if not RUNTIME_CONFIG_FILE.exists():
         return RUNTIME_CONFIG
     try:
-        payload = json.loads(RUNTIME_CONFIG_FILE.read_text(encoding="utf-8"))
+        payload = json.loads(RUNTIME_CONFIG_FILE.read_text(encoding="utf-8-sig"))
         if isinstance(payload, dict):
             for key, value in payload.items():
                 if isinstance(key, str) and isinstance(value, str):
@@ -213,6 +215,18 @@ def get_aimlapi_api_key() -> str:
     return "" if value.lower() in placeholders else value
 
 
+def get_litellm_api_key() -> str:
+    value = (
+        get_config("LITELLM_API_KEY").strip()
+        or get_config("TEAM_MODEL_API_KEY").strip()
+        or get_config("OPENAI_COMPATIBLE_API_KEY").strip()
+    )
+    if value.upper().startswith("LITELLM_API_KEY="):
+        value = value.split("=", 1)[1].strip()
+    placeholders = {"", "isi_key_litellm_anda", "your_litellm_api_key_here", "sk-..."}
+    return "" if value.lower() in placeholders else value
+
+
 def get_resume_models() -> list[str]:
     configured = get_config("OPENAI_RESUME_MODEL", OPENAI_PRIMARY_RESUME_MODEL)
     fallback = get_config("OPENAI_RESUME_FALLBACK_MODEL", OPENAI_FALLBACK_RESUME_MODEL)
@@ -254,6 +268,20 @@ def get_aimlapi_model() -> str:
 
 def get_aimlapi_base_url() -> str:
     return get_config("AIMLAPI_BASE_URL", AIMLAPI_DEFAULT_BASE_URL).strip().rstrip("/") or AIMLAPI_DEFAULT_BASE_URL
+
+
+def get_litellm_model() -> str:
+    return get_config("LITELLM_MODEL", LITELLM_DEFAULT_MODEL).strip() or LITELLM_DEFAULT_MODEL
+
+
+def get_litellm_base_url() -> str:
+    value = (
+        get_config("LITELLM_BASE_URL").strip()
+        or get_config("TEAM_MODEL_BASE_URL").strip()
+        or get_config("OPENAI_COMPATIBLE_BASE_URL").strip()
+        or LITELLM_DEFAULT_BASE_URL
+    )
+    return value.rstrip("/") if value else ""
 
 
 def get_ollama_base_url() -> str:
@@ -318,7 +346,7 @@ def get_ollama_status(timeout: float = 0.8) -> dict[str, Any]:
 def configured_ai_engines() -> list[str]:
     preferred = [
         engine.strip().lower()
-        for engine in get_config("AI_ENGINE_PROVIDERS", "gemini,openai,cometapi,aimlapi,openrouter,together").split(",")
+        for engine in get_config("AI_ENGINE_PROVIDERS", "gemini,litellm,openai,cometapi,aimlapi,openrouter,together").split(",")
         if engine.strip()
     ]
     engines: list[str] = []
@@ -335,13 +363,15 @@ def configured_ai_engines() -> list[str]:
             engines.append("cometapi")
         if engine == "aimlapi" and get_aimlapi_api_key():
             engines.append("aimlapi")
+        if engine == "litellm" and get_litellm_api_key() and get_litellm_base_url():
+            engines.append("litellm")
     return dedupe(engines)
 
 
 def runtime_ai_key_configured() -> bool:
     return any(
         load_runtime_config().get(key)
-        for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "TOGETHER_API_KEY", "OPENROUTER_API_KEY", "COMETAPI_API_KEY", "AIMLAPI_API_KEY", "OPENAI_COMPATIBLE_API_KEY")
+        for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "TOGETHER_API_KEY", "OPENROUTER_API_KEY", "COMETAPI_API_KEY", "AIMLAPI_API_KEY", "LITELLM_API_KEY", "TEAM_MODEL_API_KEY", "OPENAI_COMPATIBLE_API_KEY")
     )
 
 
@@ -373,6 +403,58 @@ def validate_runtime_api_key_shape(provider: str, api_key: str) -> str:
     return ""
 
 
+def openai_compatible_urls(base_url: str, suffix: str) -> list[str]:
+    base = base_url.rstrip("/")
+    clean_suffix = suffix.lstrip("/")
+    urls = [f"{base}/{clean_suffix}"]
+    if not base.endswith("/v1"):
+        urls.insert(0, f"{base}/v1/{clean_suffix}")
+    return dedupe(urls)
+
+
+def discover_litellm_model(api_key: str, base_url: str) -> str:
+    """Best effort: ask the Team Model gateway which model alias is available."""
+    preferred_fragments = (
+        "gemini-2.5-flash",
+        "gemini",
+        "gpt-4o-mini",
+        "gpt-4.1-mini",
+        "gpt-4o",
+        "claude",
+        "llama",
+    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "x-litellm-api-key": api_key,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 TalentFlow/1.0",
+    }
+    for url in openai_compatible_urls(base_url, "models"):
+        try:
+            request = urllib.request.Request(url, headers=headers, method="GET")
+            with urlopen_direct(request, timeout=15) as response:  # noqa: S310
+                payload = json.loads(response.read().decode("utf-8"))
+            raw_models = payload.get("data") if isinstance(payload, dict) else payload
+            model_ids: list[str] = []
+            if isinstance(raw_models, list):
+                for item in raw_models:
+                    if isinstance(item, dict):
+                        model_id = clean_scalar(item.get("id") or item.get("model_name") or item.get("name"))
+                    else:
+                        model_id = clean_scalar(item)
+                    if model_id:
+                        model_ids.append(model_id)
+            for fragment in preferred_fragments:
+                for model_id in model_ids:
+                    if fragment.lower() in model_id.lower():
+                        return model_id
+            if model_ids:
+                return model_ids[0]
+        except Exception:  # noqa: BLE001
+            continue
+    return LITELLM_DEFAULT_MODEL
+
+
 def select_ai_engines() -> list[str]:
     engines = configured_ai_engines()
     if get_ai_engine_strategy() == "random":
@@ -394,6 +476,7 @@ def build_ai_status() -> dict[str, Any]:
             "openrouterConfigured": bool(get_openrouter_api_key()),
             "cometapiConfigured": bool(get_cometapi_api_key()),
             "aimlapiConfigured": bool(get_aimlapi_api_key()),
+            "teamModelConfigured": bool(get_litellm_api_key() and get_litellm_base_url()),
             "ollamaConfigured": ollama_ready,
             "mode": f"Ollama Local AI â€¢ {configured_model}" if ollama_ready else "Local Max Parser",
             "primaryModel": configured_model if ollama_ready else "Local rules + evidence scoring",
@@ -418,6 +501,7 @@ def build_ai_status() -> dict[str, Any]:
     openrouter_key = get_openrouter_api_key()
     cometapi_key = get_cometapi_api_key()
     aimlapi_key = get_aimlapi_api_key()
+    litellm_key = get_litellm_api_key()
     active_engines = configured_ai_engines()
     providers = []
     if "openai" in active_engines and openai_key:
@@ -432,6 +516,8 @@ def build_ai_status() -> dict[str, Any]:
         providers.append(f"CometAPI {get_cometapi_model()}")
     if "aimlapi" in active_engines and aimlapi_key:
         providers.append(f"AIMLAPI {get_aimlapi_model()}")
+    if "litellm" in active_engines and litellm_key:
+        providers.append(f"Team Model {get_litellm_model()}")
     ai_configured = bool(providers)
     return {
         "aiConfigured": ai_configured,
@@ -441,6 +527,8 @@ def build_ai_status() -> dict[str, Any]:
         "openrouterConfigured": bool(openrouter_key),
         "cometapiConfigured": bool(cometapi_key),
         "aimlapiConfigured": bool(aimlapi_key),
+        "teamModelConfigured": bool(litellm_key and get_litellm_base_url()),
+        "teamModelBaseUrlConfigured": bool(get_litellm_base_url()),
         "mode": " + ".join(providers) if providers else "Local Smart Parser",
         "primaryModel": providers[0] if providers else get_resume_models()[0],
         "fallbackModels": providers[1:],
@@ -675,6 +763,7 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
             payload = self.read_json_body()
             api_key = clean_scalar(payload.get("apiKey"))
             model = clean_scalar(payload.get("model"))
+            base_url = clean_scalar(payload.get("baseUrl")) or LITELLM_DEFAULT_BASE_URL
 
             provider_map = {
                 "gemini": ("GEMINI_API_KEY", "GEMINI_RESUME_MODEL", GEMINI_DEFAULT_RESUME_MODEL),
@@ -683,6 +772,8 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
                 "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", OPENROUTER_DEFAULT_MODEL),
                 "cometapi": ("COMETAPI_API_KEY", "COMETAPI_MODEL", COMETAPI_DEFAULT_MODEL),
                 "aimlapi": ("AIMLAPI_API_KEY", "AIMLAPI_MODEL", AIMLAPI_DEFAULT_MODEL),
+                "litellm": ("LITELLM_API_KEY", "LITELLM_MODEL", LITELLM_DEFAULT_MODEL),
+                "team-model": ("LITELLM_API_KEY", "LITELLM_MODEL", LITELLM_DEFAULT_MODEL),
             }
             requested_provider = clean_scalar(payload.get("provider")).lower() if "provider" in payload else ""
             key_probe = api_key.strip()
@@ -690,13 +781,17 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
             auto_provider = ""
             if key_probe_lower.startswith(("sk-or-", "sk-or-v1-")):
                 auto_provider = "openrouter"
-            elif key_probe_lower.startswith("sk-"):
+            elif key_probe_lower.startswith("sk-proj-"):
                 auto_provider = "openai"
+            elif key_probe_lower.startswith("sk-"):
+                auto_provider = "litellm"
             elif key_probe_lower.startswith(("tgp_", "together_")):
                 auto_provider = "together"
             elif key_probe.startswith("AIza"):
                 auto_provider = "gemini"
             provider = requested_provider if requested_provider in provider_map else auto_provider
+            if provider == "team-model":
+                provider = "litellm"
 
             if len(api_key) < 12:
                 self.send_json({"error": "API key terlalu pendek atau kosong."}, status=HTTPStatus.BAD_REQUEST)
@@ -704,7 +799,7 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
             if provider not in provider_map:
                 self.send_json(
                     {
-                        "error": "Format API key belum dikenali otomatis. Saat ini sistem mengenali Gemini (AIza...), OpenAI (sk-...), OpenRouter (sk-or...), dan Together (tgp_...).",
+                        "error": "Format API key belum dikenali otomatis. Saat ini sistem mengenali Gemini (AIza...), OpenAI resmi (sk-proj...), All Team Model/LiteLLM (sk-...), OpenRouter (sk-or...), dan Together (tgp_...).",
                     },
                     status=HTTPStatus.BAD_REQUEST,
                 )
@@ -716,7 +811,18 @@ class RecruitFlowHandler(SimpleHTTPRequestHandler):
 
             key_name, model_name, default_model = provider_map[provider]
             RUNTIME_CONFIG[key_name] = api_key
-            if provider == "openai" and not key_probe_lower.startswith("sk-proj-"):
+            if provider == "litellm":
+                clean_base_url = (base_url or LITELLM_DEFAULT_BASE_URL).rstrip("/")
+                RUNTIME_CONFIG["LITELLM_API_KEY"] = api_key
+                RUNTIME_CONFIG["TEAM_MODEL_API_KEY"] = api_key
+                RUNTIME_CONFIG["OPENAI_COMPATIBLE_API_KEY"] = api_key
+                RUNTIME_CONFIG["LITELLM_BASE_URL"] = clean_base_url
+                RUNTIME_CONFIG["TEAM_MODEL_BASE_URL"] = clean_base_url
+                RUNTIME_CONFIG["OPENAI_COMPATIBLE_BASE_URL"] = clean_base_url
+                RUNTIME_CONFIG["AI_ENGINE_PROVIDERS"] = "litellm"
+                if not model:
+                    default_model = discover_litellm_model(api_key, clean_base_url)
+            elif provider == "openai" and not key_probe_lower.startswith("sk-proj-"):
                 RUNTIME_CONFIG["COMETAPI_API_KEY"] = api_key
                 RUNTIME_CONFIG["AIMLAPI_API_KEY"] = api_key
                 RUNTIME_CONFIG["AI_ENGINE_PROVIDERS"] = "cometapi,openai,aimlapi"
@@ -1021,6 +1127,8 @@ def parse_resume_with_multi_engine(
             candidate = parse_resume_with_cometapi(filename, text, local_candidate, errors)
         elif engine == "aimlapi":
             candidate = parse_resume_with_aimlapi(filename, text, local_candidate, errors)
+        elif engine == "litellm":
+            candidate = parse_resume_with_litellm(filename, text, local_candidate, errors)
         else:
             continue
         if candidate:
@@ -1469,6 +1577,32 @@ def parse_resume_with_aimlapi(
     return None
 
 
+def parse_resume_with_litellm(
+    filename: str,
+    text: str,
+    local_candidate: dict[str, Any],
+    errors: list[str] | None = None,
+) -> dict[str, Any] | None:
+    if not get_litellm_api_key() or not get_litellm_base_url():
+        return None
+    if len(text.strip()) < 40:
+        if errors is not None:
+            errors.append("Team Model: teks CV terlalu pendek untuk parser text-only.")
+        return None
+
+    prompt = build_resume_prompt(filename, text, local_candidate)
+    try:
+        parsed = call_litellm_json(prompt, gemini_resume_schema(), "resume_parse", temperature=0.1, timeout=75)
+        if isinstance(parsed, dict):
+            parsed["parserMode"] = f"Team Model Structured Parser • {parsed.get('model', get_litellm_model())}"
+            parsed.setdefault("warnings", [])
+            return parsed
+    except Exception as exc:  # noqa: BLE001
+        if errors is not None:
+            errors.append(f"Team Model {get_litellm_model()}: {str(exc)[:180]}.")
+    return None
+
+
 def parse_resume_with_gemini(
     filename: str,
     text: str,
@@ -1863,6 +1997,75 @@ def call_aimlapi_json(
     return None
 
 
+def call_litellm_json(
+    prompt: str,
+    schema: dict[str, Any],
+    schema_name: str,
+    temperature: float = 0.2,
+    timeout: int = 75,
+) -> dict[str, Any] | None:
+    api_key = get_litellm_api_key()
+    base_url = get_litellm_base_url()
+    if not api_key or not base_url:
+        return None
+
+    model = get_litellm_model()
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return only valid JSON matching the schema. Do not add markdown or commentary.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": 3600,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "x-litellm-api-key": api_key,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 TalentFlow/1.0",
+    }
+
+    last_error: Exception | None = None
+    for endpoint in openai_compatible_urls(base_url, "chat/completions"):
+        for attempt in range(3):
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urlopen_direct(request, timeout=timeout) as response:  # noqa: S310
+                    response_payload = json.loads(response.read().decode("utf-8"))
+                parsed = extract_json_from_chat_completions_response(response_payload)
+                if isinstance(parsed, dict):
+                    parsed.setdefault("model", model)
+                    return parsed
+                return None
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code == 404 and endpoint.endswith("/v1/chat/completions"):
+                    break
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                    raise RuntimeError(format_openai_compatible_http_error("Team Model", model, exc)) from exc
+                time.sleep(1.5 * (attempt + 1))
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+                last_error = exc
+                if attempt == 2:
+                    if endpoint.endswith("/v1/chat/completions"):
+                        break
+                    raise RuntimeError(f"Team Model {model}: {type(exc).__name__} - {str(exc)[:180]}.") from exc
+                time.sleep(1.5 * (attempt + 1))
+    if last_error:
+        raise RuntimeError(str(last_error))
+    return None
+
+
 def call_multi_engine_json(prompt: str, schema: dict[str, Any], schema_name: str, temperature: float = 0.2, timeout: int = 75) -> dict[str, Any] | None:
     errors: list[str] = []
     for engine in select_ai_engines():
@@ -1879,6 +2082,8 @@ def call_multi_engine_json(prompt: str, schema: dict[str, Any], schema_name: str
                 parsed = call_cometapi_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
             elif engine == "aimlapi":
                 parsed = call_aimlapi_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
+            elif engine == "litellm":
+                parsed = call_litellm_json(prompt, schema, schema_name=schema_name, temperature=temperature, timeout=timeout)
             else:
                 parsed = None
             if parsed:
@@ -2001,6 +2206,8 @@ def title_engine(engine: Any) -> str:
         return "CometAPI"
     if value == "aimlapi":
         return "AIMLAPI"
+    if value == "litellm":
+        return "Team Model"
     return "AI"
 
 

@@ -3620,12 +3620,12 @@ async function saveRuntimeApiKey(event) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "API key belum bisa disimpan.");
 
-    const detectedProvider = payload.provider || "AI";
+    const detectedProvider = payload.provider === "litellm" ? "Team Model" : payload.provider || "AI";
     if (elements.apiKeyStatus) {
       elements.apiKeyStatus.className = "api-key-status success";
-      elements.apiKeyStatus.textContent = `API key aktif untuk ${detectedProvider.toUpperCase()} (${payload.maskedKey || "tersimpan"}).`;
+      elements.apiKeyStatus.textContent = `API key aktif untuk ${String(detectedProvider).toUpperCase()} (${payload.maskedKey || "tersimpan"}).`;
     }
-    pushActivity(`API key ${detectedProvider.toUpperCase()} aktif dari aplikasi. Parser siap dipakai tanpa edit backend.`);
+    pushActivity(`API key ${String(detectedProvider).toUpperCase()} aktif dari aplikasi. Parser siap dipakai tanpa edit backend.`);
     elements.apiKeyForm.reset();
     await hydrateAiParserStatus();
     window.setTimeout(() => closeDialogElement(elements.apiKeyDialog), 850);
