@@ -940,16 +940,6 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
         )
         return local_candidate
 
-    if hybrid_fast_parser_enabled() and not needs_ai_resume_refinement(local_candidate, extraction_meta):
-        local_candidate["parserMode"] = "Hybrid Fast Parser â€¢ local high confidence"
-        local_candidate["parseWarnings"] = dedupe(
-            [
-                "Fast mode: field utama terbaca confidence tinggi, AI tidak dipakai agar upload lebih cepat.",
-                *local_candidate.get("parseWarnings", []),
-            ]
-        )[:8]
-        return local_candidate
-
     ai_errors: list[str] = []
     ai_text = build_hybrid_resume_text(text, local_candidate) if hybrid_fast_parser_enabled() else text
     ai_candidate = parse_resume_with_multi_engine(filename, ai_text, local_candidate, raw, extension, ai_errors)
@@ -957,7 +947,7 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
     if ai_candidate:
         merged = merge_ai_candidate(local_candidate, ai_candidate)
         if hybrid_fast_parser_enabled():
-            merged["parserMode"] = f"Hybrid Accurate Parser â€¢ {merged.get('parserMode', 'AI fallback')}"
+            merged["parserMode"] = f"Hybrid Accurate Parser • {merged.get('parserMode', 'AI fallback')}"
         return merged
     if not configured_ai_engines():
         local_candidate["parseWarnings"] = dedupe(
@@ -967,7 +957,7 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
             ]
         )
     elif ai_errors:
-        local_candidate["parserMode"] = "Local Smart Parser â€¢ AI fallback"
+        local_candidate["parserMode"] = "Local Smart Parser • AI fallback"
         local_candidate["parseWarnings"] = dedupe(
             [
                 f"AI parser belum berhasil: {ai_errors[0]} Hasil sementara memakai Smart Parser lokal.",
