@@ -42,7 +42,7 @@ OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
 OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 
 SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx"}
-RESUME_PARSER_VERSION = "accurate-parser-2"
+RESUME_PARSER_VERSION = "ai-parser-scoring-3"
 PARSE_CACHE: dict[str, dict[str, Any]] = {}
 PARSE_CACHE_MAX_ITEMS = 120
 RUNTIME_CONFIG: dict[str, str] = {}
@@ -1092,12 +1092,14 @@ def parse_resume(filename: str, text: str, extraction_meta: dict[str, Any], raw:
             ]
         )
     elif ai_errors:
-        local_candidate["parserMode"] = "Local Smart Parser • AI fallback"
+        local_candidate["parserMode"] = "AI Parser gagal • data lokal sementara"
+        local_candidate["aiParserFailed"] = True
+        local_candidate["parseConfidence"] = min(float(local_candidate.get("parseConfidence") or 0), 0.35)
         attempted = ", ".join(select_ai_engines()) or "AI"
         local_candidate["parseWarnings"] = dedupe(
             [
-                f"AI parser belum berhasil setelah mencoba {attempted}: {' | '.join(ai_errors[:3])} Hasil sementara memakai Smart Parser lokal.",
-                "Jika API key berasal dari provider all-in/gateway lain, masukkan nama provider atau base URL agar endpoint bisa dipasang.",
+                f"AI parser belum berhasil setelah mencoba {attempted}: {' | '.join(ai_errors[:3])}",
+                "Data yang tampil masih hasil ekstraksi lokal sementara; klik Baca ulang atau cek API key/base URL agar hasil final memakai AI.",
                 *local_candidate.get("parseWarnings", []),
             ]
         )
@@ -2189,6 +2191,7 @@ CANDIDATE PROFILE AND CV TEXT:
     parsed = call_multi_engine_json(prompt, gemini_fit_score_schema(), "blueprint_fit_score", temperature=0.12, timeout=90)
     if not parsed:
         return None
+    normalize_fit_score_payload(parsed)
     normalize_fit_score_scale(parsed)
     parsed["parserMode"] = f"{title_engine(parsed.get('engine'))} Blueprint Fit Scoring â€¢ {parsed.get('model', get_gemini_resume_model())}"
     return parsed
@@ -2228,6 +2231,90 @@ def normalize_fit_score_scale(score_payload: dict[str, Any]) -> None:
     if isinstance(components, dict):
         for key in ("responsibilityFit", "challengeFit", "requirementFit"):
             components[key] = normalize_score(components.get(key))
+
+
+def normalize_fit_score_payload(score_payload: dict[str, Any]) -> None:
+    if not score_payload.get("status"):
+        score_payload["status"] = clean_scalar(score_payload.get("overallStatus")) or "Dinilai AI"
+
+    reasons = score_payload.get("reasons")
+    if not isinstance(reasons, list) or not reasons:
+        reason = clean_scalar(score_payload.get("reason"))
+        score_payload["reasons"] = [reason] if reason else []
+    else:
+        score_payload["reasons"] = [clean_scalar(item) for item in reasons if clean_scalar(item)]
+
+    components = score_payload.get("componentScores")
+    if not isinstance(components, dict):
+        components = {}
+        score_payload["componentScores"] = components
+
+    def nested_score(*keys: str) -> Any:
+        for key in keys:
+            value = components.get(key)
+            if isinstance(value, dict):
+                return value.get("score")
+            if value not in (None, ""):
+                return value
+        return 0
+
+    components["responsibilityFit"] = nested_score("responsibilityFit", "mainResponsibilitiesFit", "mainResponsibilityFit")
+    components["challengeFit"] = nested_score("challengeFit", "roleChallengesFit", "challengeFit")
+    components["requirementFit"] = nested_score("requirementFit", "jobRequirementsFit", "requirementFit")
+
+    if score_payload.get("score") in (None, "", 0):
+        explicit_score = (
+            score_payload.get("overallScore")
+            or score_payload.get("fitScore")
+            or score_payload.get("finalScore")
+            or score_payload.get("totalScore")
+        )
+        if explicit_score not in (None, ""):
+            score_payload["score"] = explicit_score
+        else:
+            score_payload["score"] = round(
+                safe_int(components.get("responsibilityFit")) * 0.4
+                + safe_int(components.get("challengeFit")) * 0.3
+                + safe_int(components.get("requirementFit")) * 0.3
+            )
+
+    if not isinstance(score_payload.get("inferences"), list):
+        inferences: list[dict[str, Any]] = []
+        for key, label in (
+            ("mainResponsibilitiesFit", "Tanggung jawab utama"),
+            ("roleChallengesFit", "Tantangan jabatan"),
+            ("jobRequirementsFit", "Persyaratan jabatan"),
+        ):
+            value = components.get(key)
+            if isinstance(value, dict):
+                inferences.append(
+                    {
+                        "capability": label,
+                        "evidenceLevel": clean_scalar(value.get("evidenceLevel")) or "Analisis AI",
+                        "reason": clean_scalar(value.get("reason")),
+                        "confidence": 0.82,
+                    }
+                )
+        score_payload["inferences"] = [item for item in inferences if item.get("reason")]
+
+    if not isinstance(score_payload.get("gaps"), list):
+        risks = score_payload.get("risks")
+        score_payload["gaps"] = [clean_scalar(item) for item in risks if clean_scalar(item)] if isinstance(risks, list) else []
+
+    questions = score_payload.get("interviewQuestions")
+    if isinstance(questions, list):
+        score_payload["interviewQuestions"] = [
+            clean_scalar(item.get("question") if isinstance(item, dict) else item)
+            for item in questions
+            if clean_scalar(item.get("question") if isinstance(item, dict) else item)
+        ]
+    else:
+        score_payload["interviewQuestions"] = []
+
+    try:
+        score_payload["confidence"] = float(score_payload.get("confidence") or 0.82)
+    except (TypeError, ValueError):
+        score_payload["confidence"] = 0.82
 
 
 def build_resume_prompt(filename: str, text: str, local_candidate: dict[str, Any]) -> str:

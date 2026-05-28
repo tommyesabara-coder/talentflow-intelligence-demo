@@ -1532,30 +1532,35 @@ async function scoreCandidatesForBlueprint(blueprint) {
       const aiFitScore = await requestBlueprintFitScore(candidate, blueprint);
       applyBlueprintFitScore(candidate, blueprint, aiFitScore);
     } catch (error) {
-      const fallback = calculateBlueprintSpecificScore(candidate, blueprint, { ignoreAiFit: true });
-      candidate.score = fallback.score;
-      candidate.scoreBreakdown = [
-        `AI Fit Scoring belum berhasil: ${error.message}`,
-        ...fallback.breakdown,
-      ];
-      candidate.aiFitScore = {
-        blueprintId: blueprint.id,
-        score: fallback.score,
-        status: "Rule fallback",
-        confidence: 0.45,
-        componentScores: fallback.componentScores,
-        reasons: fallback.breakdown,
-        inferences: [],
-        gaps: ["Perlu jalankan ulang scoring saat data CV sudah lebih lengkap."],
-        interviewQuestions: [],
-        parserMode: "Local Blueprint Inference Fallback",
-      };
+      markAiScoringFailed(candidate, blueprint, error);
     }
   }
 
-  pushActivity(`Blueprint Fit Scoring selesai untuk ${candidates.length} kandidat ${blueprint.positionName}`);
+  pushActivity(`AI Blueprint Fit Scoring selesai untuk ${candidates.length} kandidat ${blueprint.positionName}`);
   saveState();
   render();
+}
+
+function markAiScoringFailed(candidate, blueprint, error) {
+  const previousScore = Number(candidate.aiFitScore?.score ?? candidate.score ?? 0);
+  candidate.score = previousScore || 0;
+  candidate.scoreBreakdown = [
+    `AI Fit Scoring belum berhasil: ${error.message}`,
+    "Score final belum tersedia. Klik scoring ulang setelah API aktif/stabil.",
+  ];
+  candidate.aiFitScore = {
+    blueprintId: blueprint.id,
+    blueprintName: blueprint.positionName,
+    score: candidate.score,
+    status: "AI scoring gagal",
+    confidence: 0,
+    componentScores: { responsibilityFit: 0, challengeFit: 0, requirementFit: 0 },
+    reasons: candidate.scoreBreakdown,
+    inferences: [],
+    gaps: ["AI scoring belum berhasil; jangan gunakan score ini sebagai keputusan final."],
+    interviewQuestions: [],
+    parserMode: "AI Blueprint Fit Scoring gagal",
+  };
 }
 
 function applyBlueprintFitScore(candidate, blueprint, fitScore = {}) {
@@ -3310,12 +3315,15 @@ function buildTasks() {
 }
 
 function addCandidate(candidate) {
-  const scoringResult = calculateScore(candidate);
-  const score = scoringResult.score;
   const blueprint = findActiveBlueprintByTitle(candidate.role);
   const job = findJobByTitle(candidate.role);
+  const hasAiBlueprint = Boolean(blueprint);
+  const scoringResult = hasAiBlueprint
+    ? { score: Number(candidate.aiFitScore?.score ?? 0), breakdown: ["Menunggu AI Blueprint Fit Scoring."] }
+    : calculateScore(candidate);
+  const score = scoringResult.score;
   const autoScreenThreshold = blueprint?.scoring.autoScreenThreshold ?? job?.scoring.autoScreenThreshold ?? 85;
-  const autoPromote = score >= autoScreenThreshold;
+  const autoPromote = !hasAiBlueprint && score >= autoScreenThreshold;
   const newCandidate = normalizeCandidateProfile({
     id: `cand-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     ...candidate,
@@ -3328,9 +3336,9 @@ function addCandidate(candidate) {
       candidate.fileName
         ? `CV dibaca otomatis dari ${candidate.fileName}`
         : `CV masuk dari ${candidate.source}`,
-      `Auto-score ${score}/100 berdasarkan ${
-        blueprint ? `job blueprint ${blueprint.positionName}` : job ? `scoring khusus lowongan ${job.title}` : "skill dan pengalaman"
-      }`,
+      hasAiBlueprint
+        ? `AI scoring disiapkan berdasarkan jobdesc ${blueprint.positionName}`
+        : `Auto-score ${score}/100 berdasarkan ${job ? `scoring khusus lowongan ${job.title}` : "skill dan pengalaman"}`,
       autoPromote
         ? "Kandidat diprioritaskan dan otomatis masuk screening"
         : "Kandidat masuk antrean review recruiter",
@@ -3338,7 +3346,7 @@ function addCandidate(candidate) {
   });
 
   state.candidates.unshift(newCandidate);
-  pushActivity(`${newCandidate.name} masuk • auto-score ${score}/100`);
+  pushActivity(hasAiBlueprint ? `${newCandidate.name} masuk • menunggu AI scoring` : `${newCandidate.name} masuk • auto-score ${score}/100`);
 
   if (autoPromote) {
     pushActivity(`Task screening dibuat otomatis untuk ${newCandidate.name}`);
@@ -3349,6 +3357,12 @@ function addCandidate(candidate) {
   saveState();
   refreshRoleFilter(candidate.role);
   render();
+  if (hasAiBlueprint) {
+    scoreCandidateWithActiveBlueprint(newCandidate).then(() => {
+      saveState();
+      render();
+    });
+  }
 }
 
 function getSelectedCvFiles() {
@@ -3850,7 +3864,7 @@ async function reanalyzeCandidate(candidateId, options = {}) {
     const parsedCandidate = await requestCandidateReanalysis(candidate);
     applyReanalyzedCandidate(candidate, parsedCandidate);
     await scoreCandidateWithActiveBlueprint(candidate);
-    pushActivity(`${candidate.name} dibaca ulang dengan parser lokal`);
+    pushActivity(`${candidate.name} dibaca ulang dengan AI parser`);
     saveState();
     render();
     if (options.refreshDetail) showDetails(candidate.id);
@@ -3879,25 +3893,7 @@ async function scoreCandidateWithActiveBlueprint(candidate) {
     const fitScore = await requestBlueprintFitScore(candidate, blueprint);
     applyBlueprintFitScore(candidate, blueprint, fitScore);
   } catch (error) {
-    const fallback = calculateBlueprintSpecificScore(candidate, blueprint, { ignoreAiFit: true });
-    candidate.score = fallback.score;
-    candidate.scoreBreakdown = [
-      `Blueprint Fit Scoring ulang belum berhasil: ${error.message}`,
-      ...fallback.breakdown,
-    ];
-    candidate.aiFitScore = {
-      blueprintId: blueprint.id,
-      blueprintName: blueprint.positionName,
-      score: fallback.score,
-      status: "Fallback lokal",
-      confidence: 0.45,
-      componentScores: fallback.componentScores,
-      reasons: fallback.breakdown,
-      inferences: [],
-      gaps: ["Perlu baca ulang scoring saat data CV sudah lebih lengkap."],
-      interviewQuestions: [],
-      parserMode: "Local Blueprint Inference Fallback",
-    };
+    markAiScoringFailed(candidate, blueprint, error);
   }
 }
 
@@ -3939,12 +3935,11 @@ function applyReanalyzedCandidate(candidate, parsedCandidate = {}) {
 
   Object.assign(candidate, merged, preserved);
   candidate.aiFitScore = null;
-  const scoringResult = calculateScore(candidate);
-  candidate.score = scoringResult.score;
-  candidate.scoreBreakdown = scoringResult.breakdown;
+  candidate.score = 0;
+  candidate.scoreBreakdown = ["Menunggu AI Blueprint Fit Scoring ulang."];
   candidate.history = [
     ...preserved.history,
-    `Baca ulang lokal dijalankan • ${candidate.parserMode || "parser lokal"} • score baru ${candidate.score}/100`,
+    `Baca ulang AI dijalankan • ${candidate.parserMode || "AI parser"} • menunggu AI scoring`,
   ];
 }
 
